@@ -35,7 +35,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | Task | Status | Notes |
 |---|---|---|
 | Author Go coding-standards addendum at `~/projects/coding-standards/coding-standards-go.md` | ✅ | Pre-Sprint-1 — blocks all coding tasks. Also add reference to `~/.claude/CLAUDE.md` addenda list |
-| Initialize Go module and repo structure (`cmd/`, `internal/…`) per spec | ⬜ | |
+| Initialize Go module and repo structure (`cmd/`, `internal/…`) per spec | ✅ | Module `github.com/bitsalt/bitblocker`; `cmd/bitblocker` + `internal/{blocklist,fetcher,server,config}` stubs, Makefile, `.gitignore`. `make` not yet installed locally — run `go build`/`go test` directly until then |
 | GitHub Actions CI skeleton (build + test on push) | ⬜ | |
 | Config schema (YAML) with validation | ⬜ | License key must accept env var override |
 | Structured JSON logging setup | ⬜ | |
