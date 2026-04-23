@@ -36,7 +36,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 |---|---|---|
 | Author Go coding-standards addendum at `~/projects/coding-standards/coding-standards-go.md` | ✅ | Pre-Sprint-1 — blocks all coding tasks. Also add reference to `~/.claude/CLAUDE.md` addenda list |
 | Initialize Go module and repo structure (`cmd/`, `internal/…`) per spec | ✅ | Module `github.com/bitsalt/bitblocker`; `cmd/bitblocker` + `internal/{blocklist,fetcher,server,config}` stubs, Makefile, `.gitignore`. `make` not yet installed locally — run `go build`/`go test` directly until then |
-| GitHub Actions CI skeleton (build + test on push) | ⬜ | |
+| GitHub Actions CI skeleton (build + test on push) | ✅ | `.github/workflows/ci.yml`: build, vet, race-enabled tests, `go mod verify`, `govulncheck`. `golangci-lint` deferred — needs `.golangci.yml` (not yet in sprint plan, see Carry-over) |
 | Config schema (YAML) with validation | ⬜ | License key must accept env var override |
 | Structured JSON logging setup | ⬜ | |
 | CIDR trie supporting IPv4 + IPv6 lookups | ⬜ | |
@@ -134,7 +134,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 
 | Task | Original sprint | Moved to | Reason |
 |---|---|---|---|
-| | | | |
+| Add `.golangci.yml` and wire `golangci-lint` into CI + pre-commit | Sprint 1 | TBD | Required by Go coding standards but not in the original Sprint 1 plan; surfaced during CI skeleton task |
 
 ---
 
