@@ -1,0 +1,78 @@
+# golangci-lint configuration — mirrors the linter set called out in
+# coding-standards-go.md §11. Formatters (gofmt, goimports) live in
+# their own v2 section and are enforced both locally (via the
+# pre-commit hook) and in CI.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    gocyclo:
+      min-complexity: 10
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    govet:
+      enable-all: true
+      disable:
+        # Fighting struct layout for a few bytes of padding costs
+        # readability; the codebase is not allocation-bound here.
+        - fieldalignment
+    revive:
+      severity: warning
+      rules:
+        - name: exported
+          disabled: false
+        - name: package-comments
+          disabled: false
+        - name: var-naming
+          disabled: false
+        - name: context-as-argument
+          disabled: false
+        - name: error-return
+          disabled: false
+        - name: error-strings
+          disabled: false
+        - name: if-return
+          disabled: false
+        - name: indent-error-flow
+          disabled: false
+  exclusions:
+    rules:
+      # Tests are exempt from some noise that doesn't apply there.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocyclo
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/bitsalt/bitblocker
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

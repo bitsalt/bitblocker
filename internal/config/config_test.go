@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/stretchr/testify/require"
+
+	"github.com/bitsalt/bitblocker/internal/config"
 )
 
 const validYAML = `
@@ -161,8 +162,9 @@ func TestValidate_Invalid(t *testing.T) {
 		{
 			name: "no sources enabled",
 			mutate: func(s string) string {
-				s = strings.Replace(s, "maxmind:\n    enabled: true", "maxmind:\n    enabled: false", 1)
-				return strings.Replace(s, "bgptools:\n    enabled: false", "bgptools:\n    enabled: false", 1)
+				// bgptools.enabled is already false in the base fixture;
+				// flipping maxmind leaves both disabled.
+				return strings.Replace(s, "maxmind:\n    enabled: true", "maxmind:\n    enabled: false", 1)
 			},
 			wantSub: "at least one source",
 		},

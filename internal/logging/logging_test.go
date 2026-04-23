@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/logging"
-	"github.com/stretchr/testify/require"
 )
 
 func newTestLogger(t *testing.T, cfg config.LoggingConfig) (*slog.Logger, *bytes.Buffer) {

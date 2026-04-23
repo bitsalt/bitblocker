@@ -115,6 +115,8 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | 2026-04-22 | MaxMind consumed as MMDB binary format (not CSV) | Native Go library `maxminddb-golang` exists; avoids custom CSV parsing |
 | 2026-04-22 | ASN blocking via BGP.tools deferred from v1 | Data-source access question unresolved; config schema stays forward-compatible (accepts `block.asns`, logs "not implemented" if populated) |
 | 2026-04-22 | Malformed `/check` fails closed; header selection is `X-Real-IP` first, then rightmost-XFF | Leftmost XFF is spoofable under Traefik's `trustForwardHeader: true`; `X-Real-IP` reflects the TCP peer Traefik actually saw. Leftmost-XFF support deferred to a future config knob for upstream-CDN scenarios |
+| 2026-04-23 | Raw shell pre-commit hook under `scripts/git-hooks/`, activated via `core.hooksPath`, rather than the `pre-commit` framework | Project is solo and Go-only; adding a Python toolchain for one linter is overkill. Migrating to the `pre-commit` framework later is a half-hour job if the contributor surface grows |
+| 2026-04-23 | `golangci-lint` pinned to v2.11.4 in CI; local installs run whatever `go install @latest` resolves | Pinning in CI keeps the gate reproducible; leaving local loose avoids forcing contributors through a specific install ritual. If local and CI diverge, bump the CI pin |
 
 ---
 
@@ -134,7 +136,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 
 | Task | Original sprint | Moved to | Reason |
 |---|---|---|---|
-| Add `.golangci.yml` and wire `golangci-lint` into CI + pre-commit | Sprint 1 | TBD | Required by Go coding standards but not in the original Sprint 1 plan; surfaced during CI skeleton task |
+| ~~Add `.golangci.yml` and wire `golangci-lint` into CI + pre-commit~~ | Sprint 1 | — | Resolved 2026-04-23: `.golangci.yml` + CI job + raw `scripts/git-hooks/pre-commit` in place |
 
 ---
 

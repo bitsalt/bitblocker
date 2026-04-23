@@ -4,8 +4,9 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/bitsalt/bitblocker/internal/blocklist"
 	"github.com/stretchr/testify/require"
+
+	"github.com/bitsalt/bitblocker/internal/blocklist"
 )
 
 func prefix(t *testing.T, s string) netip.Prefix {
@@ -40,10 +41,10 @@ func TestNew_Empty(t *testing.T) {
 
 func TestInsertAndLookup_IPv4(t *testing.T) {
 	cases := []struct {
-		name    string
-		cidrs   []string
-		ip      string
-		want    bool
+		name  string
+		cidrs []string
+		ip    string
+		want  bool
 	}{
 		{"single host matches", []string{"1.2.3.4/32"}, "1.2.3.4", true},
 		{"single host rejects neighbor", []string{"1.2.3.4/32"}, "1.2.3.5", false},
