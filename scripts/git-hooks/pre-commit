@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# `go install` drops binaries in $(go env GOPATH)/bin, which isn't always on
+# PATH in non-interactive shells (e.g. some GUI git clients). Add it so the
+# hook finds golangci-lint after a plain `go install`.
+if command -v go >/dev/null 2>&1; then
+  PATH="$(go env GOPATH)/bin:$PATH"
+fi
+
 if ! command -v golangci-lint >/dev/null 2>&1; then
   echo "pre-commit: golangci-lint not found on PATH" >&2
   echo "install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest" >&2
