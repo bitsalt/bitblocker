@@ -1,1 +1,1 @@
-# Project BitBlock (working title)
+# Project BitBlocker (working title)
