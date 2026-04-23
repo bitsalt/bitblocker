@@ -6,11 +6,15 @@ These instructions tell you how to create a new project file for the BitSalt spr
 
 ## Your Job
 
-You will produce a single Markdown file that fits into an existing sprint tracking system. The output file should be ready to save directly into the Obsidian vault at:
+You will produce a single Markdown file that fits into an existing sprint tracking system. The output file should be ready to save directly into the project's own `docs/` directory at:
 
-`/home/jeff/projects/[Project-Name].md`
+`/home/jeff/projects/[project-repo-name]/docs/[Project-Name].md`
 
-Note: file names should use hyphens rather than spaces to be easily compatible with Linux systems 
+Where:
+- `[project-repo-name]` is the repository's directory name (typically lowercase-hyphenated, e.g. `bitblock`, `bitsalt-ansible`).
+- `[Project-Name]` is the project's display name used in `[[BitSalt-Projects]]` (typically PascalCase, e.g. `BitBlocker`). Use hyphens instead of spaces for multi-word names to stay Linux-friendly.
+
+Do not write project files to the vault root (`/home/jeff/projects/`) — that location is reserved for vault-level index notes (e.g. `BitSalt-Projects.md`, `Sprint-Review.md`), not per-project files.
 
 ---
 
@@ -35,6 +39,7 @@ Once the plan is confirmed, break it into two-week sprints using these rules:
 
 - Each sprint should have a clear, achievable goal — one sentence describing what "done" looks like for that sprint
 - Tasks within a sprint should be discrete and completable in a single sitting where possible
+- **One task = one session.** Each task row should be sized to fit a single Claude Code session (typically one logical commit). Merge tightly-coupled work into a single task row rather than splitting across rows — e.g. "Implement X and its unit tests" is one task, not two. A task that writes an interface and another that consumes it in the same PR belongs in one row.
 - If a task has a dependency on something outside the project (AWS setup, third-party API access, another person's work), flag it explicitly in the task row
 - Do not over-pack sprints. It is better to have a lighter sprint and carry tasks forward than to set up a sprint that cannot realistically be completed in 10–20 hours of side work
 - Carry-over between sprints is expected and normal — there is a carry-over log at the bottom of the file for that purpose
