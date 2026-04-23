@@ -38,7 +38,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | Initialize Go module and repo structure (`cmd/`, `internal/…`) per spec | ✅ | Module `github.com/bitsalt/bitblocker`; `cmd/bitblocker` + `internal/{blocklist,fetcher,server,config}` stubs, Makefile, `.gitignore`. `make` not yet installed locally — run `go build`/`go test` directly until then |
 | GitHub Actions CI skeleton (build + test on push) | ✅ | `.github/workflows/ci.yml`: build, vet, race-enabled tests, `go mod verify`, `govulncheck`. `golangci-lint` deferred — needs `.golangci.yml` (not yet in sprint plan, see Carry-over) |
 | Config schema (YAML) with validation | ✅ | `internal/config`: typed structs, `Load`/`Validate`, `MAXMIND_LICENSE_KEY` env override, `behavior.startup_mode` knob, `config.example.yaml`. Full cron-expression validation deferred to Sprint 3 scheduler task (avoids pulling `robfig/cron/v3` before it's used) |
-| Structured JSON logging setup | ⬜ | |
+| Structured JSON logging setup | ✅ | `internal/logging`: `log/slog` JSON/text handlers selected from `config.LoggingConfig`, `WithContext`/`FromContext` propagation, discard-logger fallback (no `slog.Default()` reads), `Redact()` with stable 4-byte SHA-256 prefix. Not yet wired into `main` — lands with the HTTP server in Sprint 2 |
 | CIDR trie supporting IPv4 + IPv6 lookups | ⬜ | |
 | Unit tests for trie (insert, lookup, edge cases) | ⬜ | |
 
