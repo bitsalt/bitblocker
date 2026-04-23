@@ -87,7 +87,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | GitHub Actions release workflow (linux/amd64 + linux/arm64) | ⬜ | |
 | README with install + config walkthrough | ⬜ | |
 | `docs/traefik-integration.md` | ⬜ | |
-| LICENSE file | ⬜ | Depends on license confirmation |
+| LICENSE file (MIT) | ✅ | Added 2026-04-23, ahead of Sprint 4 |
 | Tag v1.0 and publish release | ⬜ | |
 
 ---
@@ -117,6 +117,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | 2026-04-22 | Malformed `/check` fails closed; header selection is `X-Real-IP` first, then rightmost-XFF | Leftmost XFF is spoofable under Traefik's `trustForwardHeader: true`; `X-Real-IP` reflects the TCP peer Traefik actually saw. Leftmost-XFF support deferred to a future config knob for upstream-CDN scenarios |
 | 2026-04-23 | Raw shell pre-commit hook under `scripts/git-hooks/`, activated via `core.hooksPath`, rather than the `pre-commit` framework | Project is solo and Go-only; adding a Python toolchain for one linter is overkill. Migrating to the `pre-commit` framework later is a half-hour job if the contributor surface grows |
 | 2026-04-23 | `golangci-lint` pinned to v2.11.4 in CI; local installs run whatever `go install @latest` resolves | Pinning in CI keeps the gate reproducible; leaving local loose avoids forcing contributors through a specific install ritual. If local and CI diverge, bump the CI pin |
+| 2026-04-23 | License: MIT | Lowest-friction permissive license for a small self-hosted infra tool; standard in the Go single-binary ecosystem. Apache-2.0's patent grant and NOTICE machinery don't earn their keep here — nothing in the codebase is patentable (CIDR tries, MMDB lookups, forwardAuth shims are decades-old prior art) and the target audience is hobbyist self-hosters, not F500 legal intake. Relicense is possible later if the project ever heads toward a CNCF/Apache-umbrella home |
 
 ---
 
@@ -127,7 +128,6 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | MaxMind license key procurement (blocks Sprint 3 fetcher work end-to-end) | Jeff | ⬜ |
 | ASN blocking via BGP.tools — include in v1.x or push to v2? | Jeff | ⬜ |
 | Allowlist feature (exempt admin/monitoring IPs) — v1 or later? | Jeff | ⬜ |
-| License confirmation (MIT default) — needed before v1.0 tag | Jeff | ⬜ |
 | Leftmost-XFF config knob for upstream CDN scenarios — when does this become needed? | Jeff | ⬜ |
 
 ---

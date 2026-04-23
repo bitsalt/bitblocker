@@ -75,4 +75,4 @@ The MaxMind license key may be supplied inline or via the `MAXMIND_LICENSE_KEY` 
 
 ## License
 
-TBD before the v1.0 tag (MIT is the default assumption — see the open questions in [docs/BitBlocker.md](docs/BitBlocker.md)).
+MIT — see [LICENSE](LICENSE). Reasoning is in the decisions log in [docs/BitBlocker.md](docs/BitBlocker.md).
