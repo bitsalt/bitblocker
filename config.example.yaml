@@ -1,0 +1,38 @@
+# BitBlocker example configuration.
+#
+# The MaxMind license key may be supplied here or via the MAXMIND_LICENSE_KEY
+# environment variable; the environment variable wins if both are set.
+
+listen:
+  host: "127.0.0.1"
+  port: 8080
+
+block:
+  countries:
+    - CN
+    - RU
+  # ASN blocking is accepted by the schema but logs "not implemented" at
+  # runtime in v1; the data-source integration lands in a later release.
+  asns: []
+
+sources:
+  maxmind:
+    enabled: true
+    license_key: ""            # prefer MAXMIND_LICENSE_KEY env var
+    edition: "GeoLite2-Country"
+  bgptools:
+    enabled: false
+
+refresh:
+  schedule: "0 3 * * *"        # cron expression; validated at scheduler start
+  timeout: 30s
+
+behavior:
+  log_blocked: true
+  log_allowed: false
+  response_code: 403           # used by the forwardAuth endpoint
+  startup_mode: "fail-closed"  # fail-closed | fail-open
+
+logging:
+  level: "info"                # debug | info | warn | error
+  format: "json"               # json | text
