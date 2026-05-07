@@ -50,7 +50,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 
 | Task | Status | Notes |
 |---|---|---|
-| Integrate `maxminddb-golang` reader and populate trie from MMDB | ⬜ | |
+| Integrate `maxminddb-golang` reader and populate trie from MMDB | ✅ | `internal/mmdb/{doc,loader,loader_test}.go`. Pinned `maxminddb-golang v1.13.1` and `mmdbwriter v1.0.0` (test-only) — both pinned below the Go 1.24 floor that newer releases introduced, to stay compatible with the project's `go 1.22.2` toolchain. Loader uses `Networks(SkipAliasedNetworks)` and switches on `len(net.IP)` to build `netip.Prefix` in the form `Trie.Insert` expects. Country match is on `country.iso_code` only — see Open Questions for the `registered_country` scope decision. Lesson `lessons/maxminddb/version-floors-and-aliasing-gotchas.md` written in agent-knowledge-base. PR #2 |
 | Atomic swap mechanism (pointer swap under RWMutex) | ⬜ | |
 | Disk cache: write snapshot on successful load, read on startup | ⬜ | |
 | HTTP server with `/check` endpoint | ⬜ | |
@@ -129,6 +129,9 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | ASN blocking via BGP.tools — include in v1.x or push to v2? | Jeff | ⬜ |
 | Allowlist feature (exempt admin/monitoring IPs) — v1 or later? | Jeff | ⬜ |
 | Leftmost-XFF config knob for upstream CDN scenarios — when does this become needed? | Jeff | ⬜ |
+| MMDB country match scope: `country.iso_code` only, or also `registered_country.iso_code`? v1 currently matches `country` only; false negatives would be IPs geolocated outside the blocked country but registered inside it. Decide before v1 release; cheap to add later | Jeff | ⬜ |
+| Toolchain bump path to unblock `maxminddb-golang/v2` and recent `mmdbwriter` (Go 1.24 floor). Current `go 1.22.2` pin works fine for v1.0; a future feature might want the v2 reader. Separate sprint-level decision | Jeff | ⬜ |
+| Pre-existing `govulncheck` finding `GO-2025-3750` on `os@go1.22.2` (Windows-only). Pre-existing on `main`, not introduced by PR #2. Toolchain bump (per the question above) would close it. Decide: suppress / document / bump | DevOps | ⬜ |
 
 ---
 
