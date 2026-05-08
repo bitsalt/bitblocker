@@ -53,11 +53,11 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | Integrate `maxminddb-golang` reader and populate trie from MMDB | ✅ | `internal/mmdb/{doc,loader,loader_test}.go`. Pinned `maxminddb-golang v1.13.1` and `mmdbwriter v1.0.0` (test-only) — both pinned below the Go 1.24 floor that newer releases introduced, to stay compatible with the project's `go 1.22.2` toolchain. Loader uses `Networks(SkipAliasedNetworks)` and switches on `len(net.IP)` to build `netip.Prefix` in the form `Trie.Insert` expects. Country match is on `country.iso_code` only — see Open Questions for the `registered_country` scope decision. Lesson `lessons/maxminddb/version-floors-and-aliasing-gotchas.md` written in agent-knowledge-base. PR #2 |
 | Atomic swap mechanism (pointer swap under RWMutex) | ⬜ | |
 | Disk cache: write snapshot on successful load, read on startup | ⬜ | |
-| HTTP server with `/check` endpoint | ⬜ | |
-| Client IP extraction: `X-Real-IP` first, rightmost-XFF fallback | ⬜ | |
-| `/healthz` endpoint (returns 503 while blocklist empty) | ⬜ | |
-| Fail-closed on unparseable `/check` with WARN log | ⬜ | |
-| HTTP handler tests | ⬜ | |
+| HTTP server with `/check` endpoint | ✅ | Request-path slice (PR #5; merge `20b096f`; landing commit `55db825` "server(http): land /check + /healthz request-path slice"). `/check` returns 200/403 against the daemon's `Lookup` interface seam; today's wiring uses an empty `LookupSource`, so all `/check` calls return 200 (allow) until the swap+disk-cache slice replaces it with an `atomic.Pointer[blocklist.Trie]`-backed source. Request-path semantics (header selection, fail-closed, healthz) all in place |
+| Client IP extraction: `X-Real-IP` first, rightmost-XFF fallback | ✅ | Landed in PR #5 alongside `/check`. `X-Real-IP` consulted first; falls back to rightmost entry of `X-Forwarded-For` per decisions log 2026-04-22. Leftmost-XFF deferred to a future config knob (Open Question) |
+| `/healthz` endpoint (returns 503 while blocklist empty) | ✅ | Landed in PR #5. Returns 503 while `LookupSource` is empty (cold-start posture); flips to 200 once the trie is populated. Empty source today is the "always allow" stub; once swap+disk-cache slice lands, `/healthz` actually reflects ruleset state |
+| Fail-closed on unparseable `/check` with WARN log | ✅ | Landed in PR #5. Unparseable IP → 403 + WARN-level structured log via `internal/logging`. Aligns with decisions-log 2026-04-22 fail-closed posture |
+| HTTP handler tests | ✅ | Landed in PR #5. `httptest`-based table-driven tests exercise: header-selection precedence, malformed input fail-closed, `/healthz` empty/non-empty paths, `/check` allow/deny against a stubbed `Lookup` |
 
 ---
 
@@ -110,6 +110,7 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 
 | Date | Decision | Reasoning |
 |---|---|---|
+| 2026-05-08 | Sprint 2 split into request-path slice (PR #5) and swap+disk-cache slice (separate session) | The five tasks bundled into PR #5 (`/check` + IP extraction + `/healthz` + fail-closed + handler tests) all share the same request-handler code path; landing them together kept the seams coherent and avoided thrashing on the same files across two PRs. The swap+disk-cache slice is the parallel Sprint 2 slice and proceeds against the `Lookup` interface seam — the server defines the interface at the consumer side; today's wiring uses an empty `LookupSource`; the swap slice replaces it with an `atomic.Pointer[blocklist.Trie]`-backed source with no server-side changes. The two slices were intentionally decoupled so each could land thoroughly without one blocking the other; the seam is the contract |
 | 2026-04-22 | Cold-start fail mode: fail-closed with guardrails | Authorization gate with no ruleset loaded should default-deny. Disk cache, `startup_mode` config knob, `/healthz` 503, and bounded retry make it operationally tolerable |
 | 2026-04-22 | IPv4 + IPv6 supported from Sprint 1 | GeoLite2 ships both; retrofitting the trie later would be painful |
 | 2026-04-22 | MaxMind consumed as MMDB binary format (not CSV) | Native Go library `maxminddb-golang` exists; avoids custom CSV parsing |
@@ -130,8 +131,9 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 | Allowlist feature (exempt admin/monitoring IPs) — v1 or later? | Jeff | ⬜ |
 | Leftmost-XFF config knob for upstream CDN scenarios — when does this become needed? | Jeff | ⬜ |
 | MMDB country match scope: `country.iso_code` only, or also `registered_country.iso_code`? v1 currently matches `country` only; false negatives would be IPs geolocated outside the blocked country but registered inside it. Decide before v1 release; cheap to add later | Jeff | ⬜ |
-| Toolchain bump path to unblock `maxminddb-golang/v2` and recent `mmdbwriter` (Go 1.24 floor). Current `go 1.22.2` pin works fine for v1.0; a future feature might want the v2 reader. Separate sprint-level decision | Jeff | ⬜ |
-| Pre-existing `govulncheck` finding `GO-2025-3750` on `os@go1.22.2` (Windows-only). Pre-existing on `main`, not introduced by PR #2. Toolchain bump (per the question above) would close it. Decide: suppress / document / bump | DevOps | ⬜ |
+| Toolchain bump path to unblock `maxminddb-golang/v2` and recent `mmdbwriter` (Go 1.24 floor). Current `go 1.22.2` pin works fine for v1.0; a future feature might want the v2 reader. Separate sprint-level decision. **Refreshed 2026-05-08 (PR #5):** rationale is now feature-unblock AND security-current — eight stdlib `govulncheck` findings against `go 1.22.2` surfaced in CI when PR #5's request-path code path made the lint/vuln jobs meaningful (previously masked because `main.go` was a no-op print). Bumping the toolchain closes the security surface in addition to unblocking the v2 reader | Jeff | ⬜ |
+| Pre-existing `govulncheck` findings against `go 1.22.2` stdlib. Originally filed for `GO-2025-3750` (Windows-only `os@go1.22.2`); **refreshed 2026-05-08 (PR #5):** eight stdlib findings now visible in CI — the original `GO-2025-3750` may be among them or distinct. Pre-existing on `main`, not introduced by PR #5; surfaced now because PR #5's request-path code makes the vuln-scan job meaningful for the first time (previous `main.go` was a no-op print). Specific CVE IDs need reconciliation at next DevOps pass against the eight findings; toolchain bump (per the question above) would close all stdlib-rooted findings. Decide per-finding: suppress / document / bump | DevOps | ⬜ |
+| `golangci-lint` GitHub Action version: workflow uses action `golangci/golangci-lint-action@v6` against pinned linter `v2.11.4`; needs action `@v7` for compatibility with the v2 linter line. Pre-existing on `main`; surfaced 2026-05-08 because PR #5 was the first PR to exercise the lint job meaningfully. Routes to DevOps; not a blocker for the current Sprint 2 slice | DevOps | ⬜ |
 
 ---
 
