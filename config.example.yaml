@@ -33,6 +33,14 @@ behavior:
   response_code: 403           # used by the forwardAuth endpoint
   startup_mode: "fail-closed"  # fail-closed | fail-open
 
+cache:
+  # On-disk blocklist snapshot. The daemon copies the source MMDB here
+  # after a successful load and reads it back on startup to serve a
+  # recent blocklist ahead of the first network fetch. A snapshot older
+  # than max_age is rejected as stale.
+  path: "/var/cache/bitblocker/GeoLite2-Country.mmdb"
+  max_age: 48h                 # reject a cache older than this
+
 logging:
   level: "info"                # debug | info | warn | error
   format: "json"               # json | text
