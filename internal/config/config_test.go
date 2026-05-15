@@ -84,6 +84,21 @@ sources:
 	require.Equal(t, config.StartupFailClosed, cfg.Behavior.StartupMode)
 	require.Equal(t, config.LogLevelInfo, cfg.Logging.Level)
 	require.Equal(t, config.LogFormatJSON, cfg.Logging.Format)
+	require.Equal(t, "/var/cache/bitblocker/GeoLite2-Country.mmdb", cfg.Cache.Path)
+	require.Equal(t, 48*time.Hour, cfg.Cache.MaxAge)
+}
+
+func TestLoad_CacheBlockOverridesDefaults(t *testing.T) {
+	body := validYAML + `
+cache:
+  path: "/tmp/bitblocker/cache.mmdb"
+  max_age: 12h
+`
+	path := writeConfig(t, body)
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "/tmp/bitblocker/cache.mmdb", cfg.Cache.Path)
+	require.Equal(t, 12*time.Hour, cfg.Cache.MaxAge)
 }
 
 func TestLoad_EnvOverridesLicenseKey(t *testing.T) {
@@ -192,6 +207,27 @@ func TestValidate_Invalid(t *testing.T) {
 			name:    "bad log format",
 			mutate:  func(s string) string { return strings.Replace(s, `format: "json"`, `format: "xml"`, 1) },
 			wantSub: "logging.format",
+		},
+		{
+			name: "empty cache path",
+			mutate: func(s string) string {
+				return s + "\ncache:\n  path: \"\"\n  max_age: 48h\n"
+			},
+			wantSub: "cache.path must not be empty",
+		},
+		{
+			name: "zero cache max_age",
+			mutate: func(s string) string {
+				return s + "\ncache:\n  path: \"/var/cache/bitblocker/c.mmdb\"\n  max_age: 0s\n"
+			},
+			wantSub: "cache.max_age must be positive",
+		},
+		{
+			name: "negative cache max_age",
+			mutate: func(s string) string {
+				return s + "\ncache:\n  path: \"/var/cache/bitblocker/c.mmdb\"\n  max_age: -1h\n"
+			},
+			wantSub: "cache.max_age must be positive",
 		},
 	}
 

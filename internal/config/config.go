@@ -61,6 +61,7 @@ type Config struct {
 	Sources  SourcesConfig  `yaml:"sources"`
 	Refresh  RefreshConfig  `yaml:"refresh"`
 	Behavior BehaviorConfig `yaml:"behavior"`
+	Cache    CacheConfig    `yaml:"cache"`
 	Logging  LoggingConfig  `yaml:"logging"`
 }
 
@@ -115,6 +116,15 @@ type BehaviorConfig struct {
 	StartupMode  StartupMode `yaml:"startup_mode"`
 }
 
+// CacheConfig governs the on-disk blocklist snapshot. The daemon copies
+// the source MMDB to Path after a successful load and reads it back on
+// startup to serve a recent blocklist ahead of the first network fetch.
+// A cache older than MaxAge is rejected as stale.
+type CacheConfig struct {
+	Path   string        `yaml:"path"`
+	MaxAge time.Duration `yaml:"max_age"`
+}
+
 // LoggingConfig selects the structured-log format and minimum level.
 type LoggingConfig struct {
 	Level  LogLevel  `yaml:"level"`
@@ -166,6 +176,10 @@ func defaults() *Config {
 			ResponseCode: 403,
 			StartupMode:  StartupFailClosed,
 		},
+		Cache: CacheConfig{
+			Path:   "/var/cache/bitblocker/GeoLite2-Country.mmdb",
+			MaxAge: 48 * time.Hour,
+		},
 		Logging: LoggingConfig{
 			Level:  LogLevelInfo,
 			Format: LogFormatJSON,
@@ -191,6 +205,7 @@ func (c *Config) Validate() error {
 	errs = append(errs, c.validateSources()...)
 	errs = append(errs, c.validateRefresh()...)
 	errs = append(errs, c.validateBehavior()...)
+	errs = append(errs, c.validateCache()...)
 	errs = append(errs, c.validateLogging()...)
 	return errors.Join(errs...)
 }
@@ -253,6 +268,17 @@ func (c *Config) validateBehavior() []error {
 	}
 	if c.Behavior.ResponseCode < 400 || c.Behavior.ResponseCode > 599 {
 		errs = append(errs, fmt.Errorf("behavior.response_code must be a 4xx or 5xx status, got %d", c.Behavior.ResponseCode))
+	}
+	return errs
+}
+
+func (c *Config) validateCache() []error {
+	var errs []error
+	if c.Cache.Path == "" {
+		errs = append(errs, errors.New("cache.path must not be empty"))
+	}
+	if c.Cache.MaxAge <= 0 {
+		errs = append(errs, fmt.Errorf("cache.max_age must be positive, got %s", c.Cache.MaxAge))
 	}
 	return errs
 }
