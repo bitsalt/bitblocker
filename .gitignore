@@ -3,3 +3,7 @@
 /coverage.html
 *.test
 *.out
+
+# Claude Code permission allowlist — machine-local symlink to platform/vault-root-settings.json.
+# bootstrap.sh creates this symlink; it must not be committed (OQ-PORTFOLIO-22 § 9.3).
+.claude/settings.json
