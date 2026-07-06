@@ -1,6 +1,6 @@
 module github.com/bitsalt/bitblocker
 
-go 1.22.2
+go 1.23.12
 
 require (
 	github.com/maxmind/mmdbwriter v1.0.0
