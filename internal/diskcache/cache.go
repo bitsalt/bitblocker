@@ -26,7 +26,7 @@ var ErrStale = errors.New("diskcache: snapshot exceeds max age")
 
 // Write copies the MMDB bytes in src to path, crash-safely. The
 // blocklist trie is rebuilt from this exact file on the next startup
-// (see Load), so the cached artifact is the raw MaxMind MMDB — there is
+// (see Load), so the cached artifact is the raw DB-IP MMDB — there is
 // no derived format. See ADR 0002.
 //
 // The write uses the standard temp-file-plus-rename discipline: bytes
@@ -42,13 +42,13 @@ func Write(path string, src io.Reader) (err error) {
 	dir := filepath.Dir(path)
 	// 0o755 per interface spec §4.3 / ADR 0002 §B: a cache directory
 	// under /var/cache is FHS-conventional world-readable; it holds
-	// only the public MaxMind MMDB, no secrets. In production the
+	// only the public DB-IP MMDB, no secrets. In production the
 	// systemd unit's CacheDirectory= owns creation and ownership.
 	if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil { //nolint:gosec // G301: see comment above
 		return fmt.Errorf("diskcache: create dir %q: %w", dir, mkErr)
 	}
 
-	tmp, err := os.CreateTemp(dir, "*.mmdb.tmp")
+	tmp, err := os.CreateTemp(dir, "dbip-country-lite.*.mmdb.tmp")
 	if err != nil {
 		return fmt.Errorf("diskcache: create temp file in %q: %w", dir, err)
 	}

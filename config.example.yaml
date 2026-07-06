@@ -1,7 +1,4 @@
 # BitBlocker example configuration.
-#
-# The MaxMind license key may be supplied here or via the MAXMIND_LICENSE_KEY
-# environment variable; the environment variable wins if both are set.
 
 listen:
   host: "127.0.0.1"
@@ -16,10 +13,10 @@ block:
   asns: []
 
 sources:
-  maxmind:
+  # DB-IP "IP-to-Country Lite" — no account, no key, no cost. The
+  # download URL is public and derived at fetch time (see ADR 0003).
+  dbip:
     enabled: true
-    license_key: ""            # prefer MAXMIND_LICENSE_KEY env var
-    edition: "GeoLite2-Country"
   bgptools:
     enabled: false
 
@@ -38,7 +35,7 @@ cache:
   # after a successful load and reads it back on startup to serve a
   # recent blocklist ahead of the first network fetch. A snapshot older
   # than max_age is rejected as stale.
-  path: "/var/cache/bitblocker/GeoLite2-Country.mmdb"
+  path: "/var/cache/bitblocker/dbip-country-lite.mmdb"
   max_age: 48h                 # reject a cache older than this
 
 logging:

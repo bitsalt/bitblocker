@@ -20,10 +20,8 @@ block:
   countries: [CN, RU]
   asns: [4134, 4837]
 sources:
-  maxmind:
+  dbip:
     enabled: true
-    license_key: "secret-key"
-    edition: "GeoLite2-Country"
   bgptools:
     enabled: false
 refresh:
@@ -55,8 +53,8 @@ func TestLoad_Valid(t *testing.T) {
 	require.Equal(t, 8080, cfg.Listen.Port)
 	require.Equal(t, []config.CountryCode{"CN", "RU"}, cfg.Block.Countries)
 	require.Equal(t, []config.ASN{4134, 4837}, cfg.Block.ASNs)
-	require.True(t, cfg.Sources.MaxMind.Enabled)
-	require.Equal(t, "secret-key", cfg.Sources.MaxMind.LicenseKey)
+	require.True(t, cfg.Sources.DBIP.Enabled)
+	require.False(t, cfg.Sources.BGPTools.Enabled)
 	require.Equal(t, 30*time.Second, cfg.Refresh.Timeout)
 	require.Equal(t, config.StartupFailClosed, cfg.Behavior.StartupMode)
 }
@@ -67,10 +65,8 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 block:
   countries: [CN]
 sources:
-  maxmind:
+  dbip:
     enabled: true
-    license_key: "k"
-    edition: "GeoLite2-Country"
 `
 	path := writeConfig(t, minimal)
 	cfg, err := config.Load(path)
@@ -84,7 +80,7 @@ sources:
 	require.Equal(t, config.StartupFailClosed, cfg.Behavior.StartupMode)
 	require.Equal(t, config.LogLevelInfo, cfg.Logging.Level)
 	require.Equal(t, config.LogFormatJSON, cfg.Logging.Format)
-	require.Equal(t, "/var/cache/bitblocker/GeoLite2-Country.mmdb", cfg.Cache.Path)
+	require.Equal(t, "/var/cache/bitblocker/dbip-country-lite.mmdb", cfg.Cache.Path)
 	require.Equal(t, 48*time.Hour, cfg.Cache.MaxAge)
 }
 
@@ -101,26 +97,6 @@ cache:
 	require.Equal(t, 12*time.Hour, cfg.Cache.MaxAge)
 }
 
-func TestLoad_EnvOverridesLicenseKey(t *testing.T) {
-	t.Setenv(config.EnvMaxMindLicenseKey, "env-key")
-	path := writeConfig(t, validYAML)
-
-	cfg, err := config.Load(path)
-	require.NoError(t, err)
-	require.Equal(t, "env-key", cfg.Sources.MaxMind.LicenseKey)
-}
-
-func TestLoad_EnvSuppliesMissingLicenseKey(t *testing.T) {
-	// Config file has empty license_key; env var provides it.
-	body := strings.Replace(validYAML, `license_key: "secret-key"`, `license_key: ""`, 1)
-	t.Setenv(config.EnvMaxMindLicenseKey, "env-key")
-	path := writeConfig(t, body)
-
-	cfg, err := config.Load(path)
-	require.NoError(t, err)
-	require.Equal(t, "env-key", cfg.Sources.MaxMind.LicenseKey)
-}
-
 func TestLoad_MissingFile(t *testing.T) {
 	_, err := config.Load(filepath.Join(t.TempDir(), "nope.yaml"))
 	require.Error(t, err)
@@ -129,6 +105,23 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoad_RejectsUnknownFields(t *testing.T) {
 	body := validYAML + "\nunknown_top_level: 1\n"
+	path := writeConfig(t, body)
+
+	_, err := config.Load(path)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse config")
+}
+
+func TestLoad_RejectsRemovedMaxMindFields(t *testing.T) {
+	// The maxmind source block is gone (ADR 0003). Because the decoder
+	// runs with KnownFields(true), a config still carrying it must be
+	// rejected rather than silently ignored — an operator upgrading
+	// across the schema change gets a loud error, not a source that
+	// quietly does nothing.
+	body := strings.Replace(validYAML,
+		"  dbip:\n    enabled: true",
+		"  maxmind:\n    enabled: true\n    license_key: \"k\"\n    edition: \"GeoLite2-Country\"",
+		1)
 	path := writeConfig(t, body)
 
 	_, err := config.Load(path)
@@ -161,25 +154,11 @@ func TestValidate_Invalid(t *testing.T) {
 			wantSub: "ISO 3166-1",
 		},
 		{
-			name: "maxmind enabled but no license key and no env",
-			mutate: func(s string) string {
-				return strings.Replace(s, `license_key: "secret-key"`, `license_key: ""`, 1)
-			},
-			wantSub: "license_key is required",
-		},
-		{
-			name: "maxmind enabled but no edition",
-			mutate: func(s string) string {
-				return strings.Replace(s, `edition: "GeoLite2-Country"`, `edition: ""`, 1)
-			},
-			wantSub: "edition is required",
-		},
-		{
 			name: "no sources enabled",
 			mutate: func(s string) string {
 				// bgptools.enabled is already false in the base fixture;
-				// flipping maxmind leaves both disabled.
-				return strings.Replace(s, "maxmind:\n    enabled: true", "maxmind:\n    enabled: false", 1)
+				// flipping dbip leaves both disabled.
+				return strings.Replace(s, "dbip:\n    enabled: true", "dbip:\n    enabled: false", 1)
 			},
 			wantSub: "at least one source",
 		},
@@ -187,6 +166,21 @@ func TestValidate_Invalid(t *testing.T) {
 			name:    "zero timeout",
 			mutate:  func(s string) string { return strings.Replace(s, "timeout: 30s", "timeout: 0s", 1) },
 			wantSub: "refresh.timeout must be positive",
+		},
+		{
+			name:    "empty schedule",
+			mutate:  func(s string) string { return strings.Replace(s, `schedule: "0 3 * * *"`, `schedule: ""`, 1) },
+			wantSub: "refresh.schedule must not be empty",
+		},
+		{
+			name:    "malformed cron schedule",
+			mutate:  func(s string) string { return strings.Replace(s, `schedule: "0 3 * * *"`, `schedule: "not a cron"`, 1) },
+			wantSub: "is not a valid cron expression",
+		},
+		{
+			name:    "out-of-range cron field",
+			mutate:  func(s string) string { return strings.Replace(s, `schedule: "0 3 * * *"`, `schedule: "0 99 * * *"`, 1) },
+			wantSub: "is not a valid cron expression",
 		},
 		{
 			name:    "bad startup_mode",
@@ -233,10 +227,6 @@ func TestValidate_Invalid(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Ensure no stray env var from another test leaks in.
-			t.Setenv(config.EnvMaxMindLicenseKey, "")
-			os.Unsetenv(config.EnvMaxMindLicenseKey)
-
 			path := writeConfig(t, tc.mutate(validYAML))
 			_, err := config.Load(path)
 			require.Error(t, err)

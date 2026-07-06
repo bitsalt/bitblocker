@@ -8,13 +8,9 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
 )
-
-// EnvMaxMindLicenseKey is the environment variable that, when set, overrides
-// sources.maxmind.license_key. Secrets belong in the environment, not the
-// config file that lives on disk.
-const EnvMaxMindLicenseKey = "MAXMIND_LICENSE_KEY"
 
 // StartupMode controls how the daemon behaves when cold-started before the
 // first blocklist has loaded.
@@ -81,17 +77,16 @@ type BlockConfig struct {
 // SourcesConfig selects and configures the upstream data providers the
 // fetcher consults.
 type SourcesConfig struct {
-	MaxMind  MaxMindConfig  `yaml:"maxmind"`
+	DBIP     DBIPConfig     `yaml:"dbip"`
 	BGPTools BGPToolsConfig `yaml:"bgptools"`
 }
 
-// MaxMindConfig configures the MaxMind GeoLite2 source. LicenseKey may
-// be supplied via the MAXMIND_LICENSE_KEY environment variable, which
-// wins if both the file and the environment supply a value.
-type MaxMindConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	LicenseKey string `yaml:"license_key"`
-	Edition    string `yaml:"edition"`
+// DBIPConfig configures the DB-IP "IP-to-Country Lite" source. The
+// source needs no account, key, or edition — the download URL is
+// public and derived at fetch time (see ADR 0003) — so Enabled is the
+// only knob.
+type DBIPConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // BGPToolsConfig configures the BGP.tools ASN source.
@@ -148,8 +143,6 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
 	}
 
-	applyEnvOverrides(cfg)
-
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validate config %q: %w", path, err)
 	}
@@ -177,19 +170,13 @@ func defaults() *Config {
 			StartupMode:  StartupFailClosed,
 		},
 		Cache: CacheConfig{
-			Path:   "/var/cache/bitblocker/GeoLite2-Country.mmdb",
+			Path:   "/var/cache/bitblocker/dbip-country-lite.mmdb",
 			MaxAge: 48 * time.Hour,
 		},
 		Logging: LoggingConfig{
 			Level:  LogLevelInfo,
 			Format: LogFormatJSON,
 		},
-	}
-}
-
-func applyEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv(EnvMaxMindLicenseKey); ok {
-		cfg.Sources.MaxMind.LicenseKey = v
 	}
 }
 
@@ -236,16 +223,8 @@ func (c *Config) validateBlock() []error {
 
 func (c *Config) validateSources() []error {
 	var errs []error
-	if c.Sources.MaxMind.Enabled {
-		if c.Sources.MaxMind.LicenseKey == "" {
-			errs = append(errs, fmt.Errorf("sources.maxmind.license_key is required when maxmind is enabled (set %s to inject at runtime)", EnvMaxMindLicenseKey))
-		}
-		if c.Sources.MaxMind.Edition == "" {
-			errs = append(errs, errors.New("sources.maxmind.edition is required when maxmind is enabled"))
-		}
-	}
-	if !c.Sources.MaxMind.Enabled && !c.Sources.BGPTools.Enabled {
-		errs = append(errs, errors.New("at least one source (maxmind, bgptools) must be enabled"))
+	if !c.Sources.DBIP.Enabled && !c.Sources.BGPTools.Enabled {
+		errs = append(errs, errors.New("at least one source (dbip, bgptools) must be enabled"))
 	}
 	return errs
 }
@@ -254,6 +233,8 @@ func (c *Config) validateRefresh() []error {
 	var errs []error
 	if c.Refresh.Schedule == "" {
 		errs = append(errs, errors.New("refresh.schedule must not be empty"))
+	} else if _, err := cron.ParseStandard(c.Refresh.Schedule); err != nil {
+		errs = append(errs, fmt.Errorf("refresh.schedule %q is not a valid cron expression: %w", c.Refresh.Schedule, err))
 	}
 	if c.Refresh.Timeout <= 0 {
 		errs = append(errs, fmt.Errorf("refresh.timeout must be positive, got %s", c.Refresh.Timeout))

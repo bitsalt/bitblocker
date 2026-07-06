@@ -3,8 +3,8 @@
 // consumes; no other package reads environment variables or parses
 // configuration directly.
 //
-// Load resolves the config file path, applies environment-variable
-// overrides (notably the MaxMind license key), and runs Validate before
-// returning. Missing required secrets or malformed values fail loudly at
+// Load resolves the config file path, decodes the YAML, and runs
+// Validate before returning. Malformed values — an invalid cron
+// schedule, an out-of-range port, no enabled source — fail loudly at
 // startup rather than at first use.
 package config

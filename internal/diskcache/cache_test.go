@@ -18,14 +18,15 @@ import (
 )
 
 // writeCountryMMDB renders (cidr, country) pairs into an MMDB at path,
-// matching the subset of GeoLite2-Country that the loader decodes. It
-// mirrors the fixture builder in internal/mmdb's tests; mmdbwriter is
-// pinned to v1.0.0 to stay below the Go 1.24 toolchain floor.
+// matching the subset of DB-IP IP-to-Country Lite that the loader
+// decodes. It mirrors the fixture builder in internal/mmdb's tests;
+// mmdbwriter is pinned to v1.0.0 to stay below the Go 1.24 toolchain
+// floor.
 func writeCountryMMDB(t *testing.T, path string, entries map[string]string) {
 	t.Helper()
 
 	w, err := mmdbwriter.New(mmdbwriter.Options{
-		DatabaseType:            "GeoLite2-Country",
+		DatabaseType:            "DBIP-Country-Lite",
 		RecordSize:              28,
 		IncludeReservedNetworks: true,
 	})
@@ -46,7 +47,7 @@ func writeCountryMMDB(t *testing.T, path string, entries map[string]string) {
 	require.NoError(t, err)
 }
 
-// mmdbBytes returns a valid GeoLite2-Country MMDB as a byte slice.
+// mmdbBytes returns a valid DB-IP IP-to-Country Lite MMDB as a byte slice.
 func mmdbBytes(t *testing.T, entries map[string]string) []byte {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "src.mmdb")
@@ -58,7 +59,7 @@ func mmdbBytes(t *testing.T, entries map[string]string) []byte {
 
 func TestWrite_RoundTripsThroughLoad(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 
@@ -71,7 +72,7 @@ func TestWrite_RoundTripsThroughLoad(t *testing.T) {
 func TestWrite_CreatesMissingParentDirectory(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
 	// A two-level-deep path whose parents do not exist yet.
-	cachePath := filepath.Join(t.TempDir(), "nested", "cache", "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "nested", "cache", "dbip-country-lite.mmdb")
 
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 	_, err := os.Stat(cachePath)
@@ -81,14 +82,14 @@ func TestWrite_CreatesMissingParentDirectory(t *testing.T) {
 func TestWrite_LeavesNoTempFileOnSuccess(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
 	dir := t.TempDir()
-	cachePath := filepath.Join(dir, "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(dir, "dbip-country-lite.mmdb")
 
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "only the final cache file should remain")
-	require.Equal(t, "GeoLite2-Country.mmdb", entries[0].Name())
+	require.Equal(t, "dbip-country-lite.mmdb", entries[0].Name())
 }
 
 // failingReader returns an error partway through, simulating an I/O
@@ -106,7 +107,7 @@ func (f *failingReader) Read(p []byte) (int, error) {
 
 func TestWrite_FailedWriteLeavesPriorCacheIntactAndNoTempFile(t *testing.T) {
 	dir := t.TempDir()
-	cachePath := filepath.Join(dir, "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(dir, "dbip-country-lite.mmdb")
 
 	// Seed a prior good cache.
 	priorRaw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
@@ -134,7 +135,7 @@ func TestLoad_AbsentReturnsErrAbsent(t *testing.T) {
 
 func TestLoad_StaleReturnsErrStale(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 
 	info, err := os.Stat(cachePath)
@@ -150,7 +151,7 @@ func TestLoad_StaleReturnsErrStale(t *testing.T) {
 
 func TestLoad_FreshWithinMaxAgeLoads(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 
 	info, err := os.Stat(cachePath)
@@ -163,7 +164,7 @@ func TestLoad_FreshWithinMaxAgeLoads(t *testing.T) {
 }
 
 func TestLoad_CorruptFileReturnsWrappedError(t *testing.T) {
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 	require.NoError(t, os.WriteFile(cachePath, []byte("not an mmdb file at all"), 0o600))
 
 	trie, err := diskcache.Load(cachePath, time.Hour, time.Now(), []config.CountryCode{"CN"})
@@ -177,7 +178,7 @@ func TestLoad_TruncatedFileReturnsWrappedError(t *testing.T) {
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "CN"})
 	require.Greater(t, len(raw), 100)
 
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 	require.NoError(t, os.WriteFile(cachePath, raw[:len(raw)/2], 0o600))
 
 	trie, err := diskcache.Load(cachePath, time.Hour, time.Now(), []config.CountryCode{"CN"})
@@ -191,7 +192,7 @@ func TestLoad_ValidButEmptyTrieIsNotAnError(t *testing.T) {
 	// loader returns an empty trie; Load returns it without error. The
 	// server's existing Len() == 0 check keeps the daemon fail-closed.
 	raw := mmdbBytes(t, map[string]string{"10.0.0.0/24": "US"})
-	cachePath := filepath.Join(t.TempDir(), "GeoLite2-Country.mmdb")
+	cachePath := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
 	require.NoError(t, diskcache.Write(cachePath, bytes.NewReader(raw)))
 
 	trie, err := diskcache.Load(cachePath, time.Hour, time.Now(), []config.CountryCode{"CN"})

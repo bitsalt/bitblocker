@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,13 +16,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bitsalt/bitblocker/internal/blocklist"
 	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/diskcache"
+	"github.com/bitsalt/bitblocker/internal/fetcher"
 	"github.com/bitsalt/bitblocker/internal/logging"
+	"github.com/bitsalt/bitblocker/internal/scheduler"
 	"github.com/bitsalt/bitblocker/internal/server"
 )
 
@@ -58,9 +62,9 @@ func run(args []string) error {
 	)
 
 	// The blocklist Source holds the active trie behind an atomic
-	// pointer; the Sprint 3 fetcher/scheduler will Swap a fresh trie
-	// in on every successful refresh. The disk cache below gives the
-	// daemon a head start ahead of that first fetch.
+	// pointer; the scheduler Swaps a fresh trie in on every successful
+	// refresh. The disk cache below gives the daemon a head start ahead
+	// of the first network fetch.
 	src := blocklist.NewSource()
 	loadDiskCache(logger, src, cfg)
 
@@ -76,15 +80,84 @@ func run(args []string) error {
 		return fmt.Errorf("server: %w", err)
 	}
 
+	fetch, err := newFetcher(cfg, src, logger)
+	if err != nil {
+		return fmt.Errorf("fetcher: %w", err)
+	}
+
+	sched, err := buildScheduler(cfg, fetch, src, logger)
+	if err != nil {
+		return fmt.Errorf("scheduler: %w", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := srv.Run(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("server: %w", err)
+	if err := runComponents(ctx, srv, sched, logger); err != nil {
+		return err
 	}
 
 	logger.Info("bitblocker: stopped")
 	return nil
+}
+
+// buildScheduler wires the periodic-refresh scheduler over the fetcher.
+// The Ready predicate reports whether a usable (cached) blocklist is
+// already active, so a failed cold-start refresh defers to the cron
+// cadence instead of burning the retry budget.
+func buildScheduler(cfg *config.Config, fetch *fetcher.Fetcher, src *blocklist.Source, logger *slog.Logger) (*scheduler.Scheduler, error) {
+	return scheduler.New(scheduler.Options{
+		Schedule: cfg.Refresh.Schedule,
+		Timeout:  cfg.Refresh.Timeout,
+		Refresh: func(ctx context.Context) error {
+			_, rerr := fetch.Refresh(ctx)
+			return rerr
+		},
+		Ready:  func() bool { t := src.Current(); return t != nil && t.Len() > 0 },
+		Logger: logger,
+	})
+}
+
+// runComponents runs the scheduler and the HTTP server concurrently
+// until ctx is cancelled or either exits, then drains the other. runCtx
+// lets the server's exit tear down the scheduler (and vice versa) even
+// when no OS signal arrived — e.g. a bind failure.
+func runComponents(ctx context.Context, srv *server.Server, sched *scheduler.Scheduler, logger *slog.Logger) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if serr := sched.Run(runCtx); serr != nil {
+			logger.Error("scheduler: stopped with error", "error", serr)
+		}
+	}()
+
+	runErr := srv.Run(runCtx)
+	cancel()
+	wg.Wait()
+
+	if runErr != nil && !errors.Is(runErr, http.ErrServerClosed) {
+		return fmt.Errorf("server: %w", runErr)
+	}
+	return nil
+}
+
+// newFetcher constructs the DB-IP fetcher with an HTTPS client pinned to
+// a TLS 1.2 floor (Go addendum §8). The per-fetch timeout is applied
+// both here and via the scheduler's context deadline.
+func newFetcher(cfg *config.Config, src *blocklist.Source, logger *slog.Logger) (*fetcher.Fetcher, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	return fetcher.New(fetcher.Options{
+		HTTPClient: &http.Client{Timeout: cfg.Refresh.Timeout, Transport: transport},
+		CachePath:  cfg.Cache.Path,
+		Countries:  cfg.Block.Countries,
+		Source:     src,
+		Logger:     logger,
+	})
 }
 
 // newLookupSource adapts a *blocklist.Source to the server's
