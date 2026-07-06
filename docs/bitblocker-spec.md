@@ -91,10 +91,10 @@ Note: Traefik's forwardAuth does not support true TCP DROP. The `403` with no bo
 | Source | Type | License | Notes |
 |---|---|---|---|
 | [BGP.tools](https://bgp.tools) | ASN → CIDR | Free, attribution | Bulk download available |
-| [MaxMind GeoLite2](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) | Country → CIDR | Free, registration required | Well-maintained, widely used |
+| [DB-IP IP-to-Country Lite](https://db-ip.com/db/download/ip-to-country-lite) | Country → CIDR | CC-BY 4.0 (attribution) | MMDB, no account/key; monthly-published dated download URL |
 | [Routeviews](http://www.routeviews.org) | BGP routing table | Free | Raw BGP data, requires parsing |
 
-MaxMind GeoLite2 is the recommended default. It requires a free account and license key, which fits the self-hosted audience without adding cost.
+DB-IP "IP-to-Country Lite" is the v1 country source (ADR 0003, 2026-07-05 — supersedes the original MaxMind GeoLite2-Country choice; MaxMind's free-tier license-key procurement was blocking the fetcher end-to-end). It ships as an MMDB file consumed via `maxminddb-golang`, requires no account or license key, and is published on a monthly cadence at a public dated URL. See `docs/adr/0003-geoip-source-db-ip-over-maxmind.md` for the full source comparison and rationale.
 
 BGP.tools ASN data is the recommended complement for ASN-level blocking.
 
@@ -128,10 +128,8 @@ block:
     - 37963  # Alibaba Cloud
 
 sources:
-  maxmind:
+  dbip:
     enabled: true
-    license_key: "YOUR_LICENSE_KEY"
-    edition: "GeoLite2-Country"
   bgptools:
     enabled: true
 
@@ -249,8 +247,6 @@ services:
     restart: unless-stopped
     volumes:
       - ./bitblocker.yaml:/etc/bitblocker/config.yaml:ro
-    environment:
-      - MAXMIND_LICENSE_KEY=${MAXMIND_LICENSE_KEY}
     ports:
       - "127.0.0.1:8080:8080"
 ```
@@ -262,7 +258,7 @@ services:
 ### v1 — Traefik forwardAuth daemon
 
 - Go daemon with in-memory CIDR trie
-- MaxMind GeoLite2 country blocking
+- DB-IP "IP-to-Country Lite" country blocking
 - BGP.tools ASN blocking
 - `forwardAuth` HTTP endpoint
 - YAML config
@@ -294,7 +290,7 @@ services:
 
 ## Open questions
 
-- **MaxMind license key requirement** — GeoLite2 requires registration. Worth evaluating `ip-api.com` or `DB-IP` free-tier databases as no-registration alternatives, even if less accurate. Decision needed before v1 release.
+- ~~**MaxMind license key requirement** — GeoLite2 requires registration. Worth evaluating `ip-api.com` or `DB-IP` free-tier databases as no-registration alternatives, even if less accurate. Decision needed before v1 release.~~ **RESOLVED 2026-07-05 (ADR 0003):** DB-IP "IP-to-Country Lite" adopted as the v1 source — no-registration, no key, no cost. See `docs/adr/0003-geoip-source-db-ip-over-maxmind.md`.
 - **IPv6** — GeoLite2 includes IPv6 ranges. The CIDR trie implementation should be evaluated for IPv6 support early to avoid a painful retrofit.
 - **Header trust** — `X-Forwarded-For` can be spoofed if BitBlocker is reachable directly. The listen address must be `127.0.0.1` or a private network interface. Document this clearly.
 - **License** — MIT is the default assumption. Confirm before publishing.
@@ -310,7 +306,7 @@ bitblocker/
 │       └── main.go
 ├── internal/
 │   ├── blocklist/      # CIDR trie, lookup logic
-│   ├── fetcher/        # MaxMind, BGP.tools data fetchers
+│   ├── fetcher/        # DB-IP, BGP.tools data fetchers
 │   ├── server/         # HTTP server, handler logic
 │   └── config/         # YAML parsing, validation
 ├── deploy/
