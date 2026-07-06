@@ -1,6 +1,7 @@
 # ADR 0001: Blocklist swap is lock-free via `atomic.Pointer[blocklist.Trie]`, not pointer-swap under `RWMutex`
 
-- **Status:** proposed
+- **Status:** accepted
+- **Accepted:** 2026-05-15 (ratified-by-adoption via PR #8 + PR #9)
 - **Date:** 2026-05-15
 - **Deciders:** Architect; confirmable at Developer touch time
 - **Supersedes:** none

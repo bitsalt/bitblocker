@@ -1,6 +1,7 @@
 # ADR 0002: Disk cache stores the raw MMDB file, written via temp-file + atomic rename, and is rebuilt through the existing loader on startup
 
-- **Status:** proposed
+- **Status:** accepted
+- **Accepted:** 2026-05-15 (ratified-by-adoption via PR #8 + PR #9)
 - **Date:** 2026-05-15
 - **Deciders:** Architect; confirmable at Developer touch time
 - **Supersedes:** none
