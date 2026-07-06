@@ -18,11 +18,14 @@ import (
 // callers wiring this package in other contexts.
 var ErrNoCountries = errors.New("mmdb: country set is empty")
 
-// countryRecord is the minimal subset of the GeoLite2-Country record
-// shape we need: the ISO 3166-1 alpha-2 code of the country the IP
-// geolocates to. We deliberately do not decode names, geoname IDs,
-// continent, or registered_country — every extra field is decoder
-// allocation we pay on every network in the DB (millions of rows).
+// countryRecord is the minimal subset of the DB-IP IP-to-Country Lite
+// record shape we need: the ISO 3166-1 alpha-2 code of the country the
+// IP geolocates to. DB-IP carries country.iso_code at exactly this
+// path, so the decode is provider-agnostic (it resolved identically
+// against GeoLite2). We deliberately do not decode names, geoname IDs,
+// or continent — every extra field is decoder allocation we pay on
+// every network in the DB (hundreds of thousands of rows). DB-IP
+// IP-to-Country Lite carries no registered_country object at all.
 type countryRecord struct {
 	Country struct {
 		ISOCode string `maxminddb:"iso_code"`

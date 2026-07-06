@@ -7,8 +7,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/bitsalt/bitblocker/internal/blocklist"
+	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/server"
 )
+
+// TestConfigExampleIsValid guards config.example.yaml against schema
+// drift: the shipped example must load and validate against the live
+// config schema, so an operator copying it gets a working daemon. It
+// also pins the ADR 0003 source-surface change (dbip, no maxmind).
+func TestConfigExampleIsValid(t *testing.T) {
+	cfg, err := config.Load("../../config.example.yaml")
+	require.NoError(t, err)
+	require.True(t, cfg.Sources.DBIP.Enabled)
+	require.Equal(t, "/var/cache/bitblocker/dbip-country-lite.mmdb", cfg.Cache.Path)
+}
 
 // TestNewLookupSource_ColdStartReturnsUntypedNil is the mandated
 // regression guard for the nil-interface trap (ADR 0001, interface

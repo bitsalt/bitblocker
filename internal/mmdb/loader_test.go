@@ -16,25 +16,30 @@ import (
 )
 
 // fixtureEntry is a single (cidr, country-code) pair that the test
-// fixture will encode into a synthetic GeoLite2-Country-shaped MMDB.
+// fixture will encode into a synthetic DB-IP IP-to-Country Lite-shaped
+// MMDB.
 type fixtureEntry struct {
 	cidr    string
 	country string // "" means write a record without a country.iso_code
 }
 
 // writeCountryMMDB renders entries into a temp MMDB whose record shape
-// matches the subset of GeoLite2-Country that the loader decodes. The
-// returned path is auto-cleaned via t.TempDir.
+// matches the subset of DB-IP IP-to-Country Lite that the loader
+// decodes (country.iso_code). The returned path is auto-cleaned via
+// t.TempDir.
 //
 // We use mmdbwriter directly — pinned to v1.0.0 to stay below the
 // Go 1.24 toolchain floor that mmdbwriter v1.1.0+ introduces — rather
 // than checking a binary fixture into the repo, so the test stays
-// self-contained and the input is obvious from the source.
+// self-contained and the input is obvious from the source. The
+// DatabaseType metadata string mirrors DB-IP's own; the loader never
+// reads it (it decodes only country.iso_code), so the fixture exercises
+// the exact code path a real DB-IP file does.
 func writeCountryMMDB(t *testing.T, entries []fixtureEntry) string {
 	t.Helper()
 
 	w, err := mmdbwriter.New(mmdbwriter.Options{
-		DatabaseType:            "GeoLite2-Country",
+		DatabaseType:            "DBIP-Country-Lite",
 		RecordSize:              28,
 		IncludeReservedNetworks: true, // documentation networks (10/8, 2001:db8::/32) are reserved
 	})
@@ -147,8 +152,8 @@ func TestLoadCountryBlocklist_NoMatchingCountries_TrieIsEmpty(t *testing.T) {
 }
 
 func TestLoadCountryBlocklist_RecordWithoutCountryFieldIsIgnored(t *testing.T) {
-	// A real GeoLite2-Country DB occasionally has records with no
-	// country (e.g. anonymous proxy ranges, anycast). Those decode to
+	// A real DB-IP IP-to-Country Lite DB occasionally has records with
+	// no country (e.g. anycast, unallocated space). Those decode to
 	// an empty ISOCode and must not match any block-list entry.
 	path := writeCountryMMDB(t, []fixtureEntry{
 		{"10.0.0.0/24", "CN"},
