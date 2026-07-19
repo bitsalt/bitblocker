@@ -192,16 +192,29 @@ func loadDiskCache(logger *slog.Logger, src *blocklist.Source, cfg *config.Confi
 	case errors.Is(err, diskcache.ErrAbsent):
 		logger.Info("disk cache: none present; cold start", "path", cfg.Cache.Path)
 	case errors.Is(err, diskcache.ErrStale):
-		logger.Warn("disk cache: stale; skipping", "path", cfg.Cache.Path, "max_age", cfg.Cache.MaxAge)
+		// Stale cache: remove it so it does not re-trip the next start's
+		// load attempt + WARN (OQ-CACHE-2 — ratified 2026-07-19).
+		logger.Warn("disk cache: stale; skipping and removing", "path", cfg.Cache.Path, "max_age", cfg.Cache.MaxAge)
+		removeUnusableCache(logger, cfg.Cache.Path)
 	case err != nil:
-		// Corrupt or unreadable cache: remove it so it does not
-		// re-trip the next start (OQ-CACHE-2 — Architect lean).
+		// Corrupt or unreadable cache: remove it for the same reason
+		// (OQ-CACHE-2).
 		logger.Warn("disk cache: unreadable; skipping and removing", "path", cfg.Cache.Path, "error", err)
-		if rmErr := os.Remove(cfg.Cache.Path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-			logger.Warn("disk cache: could not remove corrupt file", "path", cfg.Cache.Path, "error", rmErr)
-		}
+		removeUnusableCache(logger, cfg.Cache.Path)
 	default:
 		src.Swap(trie)
 		logger.Info("disk cache: loaded blocklist from disk", "path", cfg.Cache.Path, "prefixes", trie.Len())
+	}
+}
+
+// removeUnusableCache deletes a cache file that failed to load — stale
+// or corrupt — so it does not re-trip the load attempt (and its WARN) on
+// the next start (OQ-CACHE-2). Removal is best-effort and non-fatal:
+// like a failed cache write, a removal failure is logged at WARN and the
+// daemon continues its fail-closed cold start. A file already gone
+// (os.ErrNotExist) is treated as success.
+func removeUnusableCache(logger *slog.Logger, path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		logger.Warn("disk cache: could not remove unusable file", "path", path, "error", err)
 	}
 }

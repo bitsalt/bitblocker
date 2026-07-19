@@ -20,8 +20,8 @@ var ErrAbsent = errors.New("diskcache: snapshot not present")
 
 // ErrStale is returned by Load when the cache file exists but its
 // modification time is older than the configured max age. It is an
-// expected control-flow signal: the caller logs WARN and skips the
-// cache.
+// expected control-flow signal: the caller logs WARN, removes the stale
+// file, and skips the cache (OQ-CACHE-2).
 var ErrStale = errors.New("diskcache: snapshot exceeds max age")
 
 // Write copies the MMDB bytes in src to path, crash-safely. The
@@ -89,7 +89,8 @@ func Write(path string, src io.Reader) (err error) {
 //
 // The return discriminates four outcomes via errors.Is at the caller:
 //   - ErrAbsent — no file at path; proceed with a cold start.
-//   - ErrStale — file older than maxAge; skip it.
+//   - ErrStale — file older than maxAge; skip it (the caller logs WARN
+//     and removes the file, per OQ-CACHE-2).
 //   - any other non-nil error — the file is unreadable or a corrupt
 //     MMDB; skip it (the caller logs WARN and removes the file).
 //   - nil error — the trie is returned. A trie with Len() == 0 is a
