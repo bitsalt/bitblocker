@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -72,6 +78,106 @@ func TestNewLookupSource_SwapBackToNilReturnsUntypedNil(t *testing.T) {
 
 	lookup := newLookupSource(src)()
 	require.True(t, lookup == nil, "after Swap(nil) the closure must again return an untyped nil")
+}
+
+// cacheTestConfig builds the minimal config loadDiskCache reads: the
+// cache path + max age and the configured country set.
+func cacheTestConfig(path string, maxAge time.Duration) *config.Config {
+	return &config.Config{
+		Block: config.BlockConfig{Countries: []config.CountryCode{"CN"}},
+		Cache: config.CacheConfig{Path: path, MaxAge: maxAge},
+	}
+}
+
+// TestLoadDiskCache_RemovesUnusableCache is the OQ-CACHE-2 regression
+// guard: a cache file that fails to load at startup — because it is
+// corrupt or stale — must be removed so it does not re-trip the load
+// attempt (and its WARN) on the next start. In every case the daemon
+// stays fail-closed: the source is never swapped, so no trie is served.
+func TestLoadDiskCache_RemovesUnusableCache(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, path string)
+		maxAge     time.Duration
+		wantWarn   string // substring the WARN output must contain
+		wantExists bool   // whether the path should survive the call
+	}{
+		{
+			name: "corrupt file is removed",
+			setup: func(t *testing.T, path string) {
+				require.NoError(t, os.WriteFile(path, []byte("not an mmdb file"), 0o600))
+			},
+			maxAge:     time.Hour,
+			wantWarn:   "unreadable",
+			wantExists: false,
+		},
+		{
+			name: "stale file is removed",
+			setup: func(t *testing.T, path string) {
+				require.NoError(t, os.WriteFile(path, []byte("stale bytes"), 0o600))
+				// Backdate past maxAge; staleness is decided by ModTime
+				// before the MMDB is ever parsed, so the contents are
+				// irrelevant here.
+				old := time.Now().Add(-2 * time.Hour)
+				require.NoError(t, os.Chtimes(path, old, old))
+			},
+			maxAge:     time.Hour,
+			wantWarn:   "stale",
+			wantExists: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
+			tc.setup(t, path)
+
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			src := blocklist.NewSource()
+
+			loadDiskCache(logger, src, cacheTestConfig(path, tc.maxAge))
+
+			require.Contains(t, buf.String(), tc.wantWarn)
+			require.Nil(t, src.Current(), "fail-closed: the source must not be swapped from an unusable cache")
+
+			_, statErr := os.Stat(path)
+			if tc.wantExists {
+				require.NoError(t, statErr)
+			} else {
+				require.ErrorIs(t, statErr, os.ErrNotExist, "the unusable cache file must be removed")
+			}
+		})
+	}
+}
+
+// TestLoadDiskCache_RemovalFailureIsNonFatal proves the os.Remove error
+// path is non-fatal: a stale cache that cannot be removed (here a
+// non-empty directory standing in for the cache path) is logged at WARN
+// and the daemon still cold-starts fail-closed rather than aborting.
+func TestLoadDiskCache_RemovalFailureIsNonFatal(t *testing.T) {
+	// A non-empty directory at the cache path: os.Stat succeeds (so
+	// staleness is detected) but os.Remove fails with ENOTEMPTY.
+	path := filepath.Join(t.TempDir(), "dbip-country-lite.mmdb")
+	require.NoError(t, os.Mkdir(path, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "child"), []byte("x"), 0o600))
+	old := time.Now().Add(-2 * time.Hour)
+	require.NoError(t, os.Chtimes(path, old, old))
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	src := blocklist.NewSource()
+
+	require.NotPanics(t, func() {
+		loadDiskCache(logger, src, cacheTestConfig(path, time.Hour))
+	})
+
+	require.Contains(t, buf.String(), "could not remove", "the removal failure must be logged at WARN")
+	require.True(t, strings.Contains(buf.String(), "stale"), "the fallback WARN must still be emitted")
+	require.Nil(t, src.Current(), "fail-closed: the source must not be swapped")
+
+	_, statErr := os.Stat(path)
+	require.NoError(t, statErr, "removal failed, so the path still exists — and startup did not abort")
 }
 
 // staticAssertTrieSatisfiesLookup fails to compile if *blocklist.Trie
