@@ -1,0 +1,79 @@
+[Unit]
+Description=BitBlocker forwardAuth country-block daemon
+Documentation=https://github.com/bitsalt/bitblocker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bitblocker --config /etc/bitblocker/config.yaml
+
+# DynamicUser=true creates a transient, unprivileged system user (named
+# after the unit, "bitblocker") at start — no manual `useradd -r` install
+# step is required. Combined with CacheDirectory= below, systemd persists
+# a stable UID mapping for this unit's cache ownership across restarts
+# (systemd.exec(5) § "Dynamic User"), so a restart does not orphan the
+# on-disk blocklist snapshot.
+DynamicUser=true
+
+# OQ-CACHE-3 (systemd half). Creates /var/cache/bitblocker (mode 0750,
+# owned by the DynamicUser) before ExecStart runs, matching the daemon's
+# `cache.path` config default (/var/cache/bitblocker/dbip-country-lite.mmdb
+# — ADR 0003, DB-IP source; the filename is date-versioned, not the
+# GeoLite2 name the daemon used before Sprint 3). Unlike RuntimeDirectory,
+# CacheDirectory persists across service restarts, which is required for
+# the daemon's cold-start-from-disk-cache path (see internal/diskcache).
+CacheDirectory=bitblocker
+CacheDirectoryMode=0750
+
+# The operator provisions /etc/bitblocker/config.yaml themselves (see
+# README / config.example.yaml — Sprint 4 Technical Writer pass); the
+# file carries no secret in the current DB-IP-only config schema, but
+# treat it as sensitive by convention (root:root, mode 0644) since a
+# future config revision could reintroduce a credential field.
+
+Restart=on-failure
+RestartSec=5s
+
+# --- Hardening -----------------------------------------------------------
+# A network daemon that reads one config file, writes one cache
+# directory, and makes outbound HTTPS calls (DB-IP fetch) needs very
+# little of the host. ProtectSystem=strict is safe because
+# CacheDirectory= above is automatically exempted from the resulting
+# read-only filesystem (systemd.exec(5)).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Only the address families an outbound HTTPS client + name resolution
+# actually need.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+# `listen.port` (config.example.yaml) defaults to 8080 — no privileged
+# port, so no CAP_NET_BIND_SERVICE is granted above. If a deployment
+# configures listen.port < 1024, add
+# AmbientCapabilities=CAP_NET_BIND_SERVICE and drop it from
+# CapabilityBoundingSet= accordingly.
+
+[Install]
+WantedBy=multi-user.target
