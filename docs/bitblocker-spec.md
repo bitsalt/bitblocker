@@ -210,6 +210,15 @@ Traefik must be able to reach BitBlocker's listen address. If BitBlocker runs on
 
 ## Deployment
 
+> **Corrected 2026-07-20:** this section originally carried an inline
+> systemd unit and a Docker Compose snippet drafted ahead of the v1.0 build;
+> both had drifted from what actually shipped (a third copy of the unit
+> diverging from the real one is exactly how this went stale). Rather than
+> re-copy either artifact here, this section now points at the shipped
+> artifacts and the consolidated deployment guide. See
+> [docs/deployment.md](deployment.md) for the full operator-facing
+> walkthrough — it is the basis for the forthcoming ansible deployment role.
+
 ### Binary
 
 Build a single static binary. Distribute via GitHub Releases. Supports linux/amd64 and linux/arm64.
@@ -220,36 +229,23 @@ bitblocker -config /etc/bitblocker/config.yaml
 
 ### Systemd unit
 
-```ini
-[Unit]
-Description=BitBlocker geo/ASN block daemon
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/bitblocker -config /etc/bitblocker/config.yaml
-Restart=on-failure
-RestartSec=5s
-User=bitblocker
-AmbientCapabilities=
-
-[Install]
-WantedBy=multi-user.target
-```
+The reference unit is
+[`packaging/systemd/bitblocker.service`](../packaging/systemd/bitblocker.service)
+— do not hand-maintain a copy here. Notably, the shipped unit provisions its
+runtime user and cache directory via `DynamicUser=true` +
+`CacheDirectory=bitblocker` (systemd creates and owns both automatically at
+start) rather than a manually-created `bitblocker` system user, and carries a
+full hardening directive set beyond what this spec originally sketched. See
+`docs/deployment.md` for the install walkthrough.
 
 ### Docker
 
-Provide an official `Dockerfile` and a `docker-compose` snippet. Config and license key injected via volume and environment variable respectively.
-
-```yaml
-services:
-  bitblocker:
-    image: ghcr.io/bitsalt/bitblocker:latest
-    restart: unless-stopped
-    volumes:
-      - ./bitblocker.yaml:/etc/bitblocker/config.yaml:ro
-    ports:
-      - "127.0.0.1:8080:8080"
-```
+An official [`Dockerfile`](../Dockerfile) builds a multi-arch, distroless,
+non-root image published to `ghcr.io/bitsalt/bitblocker`. Config is supplied
+via a bind-mounted volume; **there is no license key** — ADR 0003 moved the
+GeoIP source to keyless DB-IP and removed the license-key config surface
+entirely. See `docs/deployment.md` for a representative `docker run`/compose
+example, including the persistent cache volume the daemon needs.
 
 ---
 
