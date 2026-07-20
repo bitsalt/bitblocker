@@ -247,6 +247,80 @@ func TestReadiness_WarmStartIsSilent(t *testing.T) {
 		"a daemon that was never unusable must emit nothing from this contract")
 }
 
+// QA gap: nothing pinned the non-suppressibility claim (ADR 0004 §E) to
+// the actual slog handler boundary. internal/config caps logging.level at
+// "error" (config.go's isValidLogLevel), so a handler configured at
+// slog.LevelError is the strictest a valid config can produce. Both
+// mandatory ERROR signals must still pass through it. The recovery INFO
+// is a separate, deliberately suppressible signal — asserting that here
+// too pins the boundary precisely, rather than leaving it implied.
+func TestHeartbeat_NotSuppressibleAtStrictestConfiguredLogLevel(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	clock := &fakeClock{at: time.Unix(1_700_000_000, 0)}
+
+	srv, err := New(Options{
+		Addr:        "127.0.0.1:0",
+		Lookup:      func() Lookup { return nil },
+		Logger:      logger,
+		BlockStatus: http.StatusForbidden,
+		StartupMode: config.StartupFailOpen,
+	})
+	require.NoError(t, err)
+	srv.readiness.now = clock.Now
+
+	srv.readiness.observe(srv.lookup())
+	clock.advance(heartbeatInterval)
+	srv.readiness.heartbeat(srv.lookup())
+
+	recs := logRecords(t, buf)
+	require.Len(t, recordsWithMsg(recs, "check: blocklist unusable; ALLOWING ALL REQUESTS (startup_mode=fail-open)"), 1,
+		"the entering-unusable ERROR must pass a logging.level=error handler")
+	require.Len(t, recordsWithMsg(recs, "check: blocklist still unusable"), 1,
+		"the heartbeat ERROR must pass a logging.level=error handler — this is the non-suppressibility guarantee")
+
+	buf.Reset()
+	srv.readiness.observe(&fakeLookup{length: 5})
+	require.Empty(t, strings.TrimSpace(buf.String()),
+		"recovery is INFO and is expected to be filtered at logging.level=error; it is not part of the "+
+			"mandatory heartbeat contract, only the two ERROR signals above are")
+}
+
+// QA gap: no test confirmed the readiness signals ignore LogBlocked /
+// LogAllowed. Those flags gate only the ordinary per-request
+// blocked/allowed lines in handleCheck; ADR 0004 §E is explicit that the
+// heartbeat "is not gated behind behavior.log_allowed ... or any new
+// flag." Both flags are set false here — the opposite of every other
+// test in this package — specifically to prove the readiness signals do
+// not consult them.
+func TestHeartbeat_NotGatedByLogBlockedOrLogAllowedFlags(t *testing.T) {
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	clock := &fakeClock{at: time.Unix(1_700_000_000, 0)}
+
+	srv, err := New(Options{
+		Addr:        "127.0.0.1:0",
+		Lookup:      func() Lookup { return nil },
+		Logger:      logger,
+		BlockStatus: http.StatusForbidden,
+		LogBlocked:  false,
+		LogAllowed:  false,
+		StartupMode: config.StartupFailClosed,
+	})
+	require.NoError(t, err)
+	srv.readiness.now = clock.Now
+
+	srv.readiness.observe(srv.lookup())
+	clock.advance(heartbeatInterval)
+	srv.readiness.heartbeat(srv.lookup())
+
+	recs := logRecords(t, buf)
+	require.Len(t, recordsWithMsg(recs, "check: blocklist unusable; denying all requests"), 1,
+		"the entering-unusable signal must not be gated by LogBlocked/LogAllowed")
+	require.Len(t, recordsWithMsg(recs, "check: blocklist still unusable"), 1,
+		"the heartbeat must not be gated by LogBlocked/LogAllowed")
+}
+
 // TestHealthz_EmptyForSecondsTracksTheWindow pins the /healthz duration
 // field to the injected clock.
 func TestHealthz_EmptyForSecondsTracksTheWindow(t *testing.T) {

@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/netip"
@@ -233,6 +234,114 @@ func TestCheck_FailOpenColdStartThroughRealLookupSource(t *testing.T) {
 		})
 		require.Equal(t, http.StatusOK, w.Code)
 	})
+}
+
+// QA gap: TestCheck_DecisionTable exercises "unusable blocklist" only
+// with a parseable X-Real-IP. Rows 2/3 of the decision table (interface
+// spec §3.1) fire on blocklist state alone, before IP extraction ever
+// runs — a malformed header must not change the outcome, and must not
+// trigger the unparseable-IP WARN, because extraction is skipped
+// entirely (interface spec §3.2). This closes that cell of the
+// mode x blocklist-state x IP-validity matrix for both UNUSABLE shapes
+// (nil and Len()==0).
+func TestCheck_UnusableBlocklistIgnoresClientIPValidity(t *testing.T) {
+	malformedHeaderSets := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"no headers at all", nil},
+		{"junk x-real-ip and junk xff", map[string]string{
+			"X-Real-IP":       "not-an-ip",
+			"X-Forwarded-For": "also-junk",
+		}},
+		{"empty xff entries only", map[string]string{"X-Forwarded-For": ", ,"}},
+	}
+
+	lookupStates := []struct {
+		name   string
+		lookup server.Lookup
+	}{
+		{"nil lookup", nil},
+		{"empty lookup", &stubLookup{length: 0}},
+	}
+
+	for _, ls := range lookupStates {
+		for _, hs := range malformedHeaderSets {
+			t.Run(ls.name+"/"+hs.name+"/fail-closed", func(t *testing.T) {
+				srv, logs := newServer(t, ls.lookup)
+				w := do(t, srv.Handler(), http.MethodGet, "/check", hs.headers)
+				require.Equal(t, http.StatusForbidden, w.Code,
+					"an unusable blocklist must fail closed regardless of client IP validity")
+				assertNoUnparseableIPWarning(t, logs)
+			})
+			t.Run(ls.name+"/"+hs.name+"/fail-open", func(t *testing.T) {
+				srv, logs := newServer(t, ls.lookup, failOpen)
+				w := do(t, srv.Handler(), http.MethodGet, "/check", hs.headers)
+				require.Equal(t, http.StatusOK, w.Code,
+					"an unusable blocklist under fail-open must allow regardless of client IP validity")
+				assertNoUnparseableIPWarning(t, logs)
+			})
+		}
+	}
+}
+
+// assertNoUnparseableIPWarning fails the test if the row-4 unparseable-IP
+// WARN appears anywhere in logs. Its presence would mean extractClientIP
+// ran despite the blocklist being unusable — exactly the misleading
+// signal interface spec §3.2 says row 3 must not produce.
+func assertNoUnparseableIPWarning(t *testing.T, logs *bytes.Buffer) {
+	t.Helper()
+	for _, l := range parseLogLines(t, logs) {
+		require.NotEqual(t, "check: fail-closed (unparseable client IP)", l["msg"],
+			"IP extraction must be skipped entirely while the blocklist is unusable")
+	}
+}
+
+// QA gap: no existing test asserts the fail-open allow counter (interface
+// spec §4.1 failOpenAllowed / failOpenAllowedWindow) is accurate — as
+// opposed to merely present — under concurrent load. Individual
+// atomic.Uint64.Add calls are race-safe by construction, but this closes
+// the loop end-to-end: N concurrent requests served under fail-open must
+// produce exactly N in the recovery signal's window counter, with no
+// lost increments.
+func TestReadiness_FailOpenCounterAccurateUnderConcurrentLoad(t *testing.T) {
+	stub := &stubLookup{length: 0}
+	srv, logs := newServer(t, stub, failOpen)
+
+	const goroutines = 20
+	const perGoroutine = 50
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range perGoroutine {
+				w := do(t, srv.Handler(), http.MethodGet, "/check", map[string]string{
+					"X-Real-IP": "198.51.100.1",
+				})
+				require.Equal(t, http.StatusOK, w.Code)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	// wg.Wait() establishes happens-before with every goroutine above, so
+	// this mutation and the request below need no further synchronization.
+	stub.length = 1
+	do(t, srv.Handler(), http.MethodGet, "/check", map[string]string{"X-Real-IP": "198.51.100.1"})
+
+	var recovered map[string]any
+	for _, l := range parseLogLines(t, logs) {
+		if l["msg"] == "check: blocklist now usable; normal enforcement resumed" {
+			recovered = l
+		}
+	}
+	require.NotNil(t, recovered, "recovery signal must have been emitted")
+	require.Equal(t, float64(goroutines*perGoroutine), recovered["failopen_allowed_total_window"],
+		"the fail-open allow counter must exactly match concurrent requests served, with no lost increments")
 }
 
 // TestReadiness_TransitionsEmitOnceUnderConcurrency hammers /check
