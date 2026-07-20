@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/server"
 )
 
@@ -28,6 +30,7 @@ func TestRun_LifecycleAgainstLoopback(t *testing.T) {
 		Lookup:      func() server.Lookup { return stub },
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		BlockStatus: http.StatusForbidden,
+		StartupMode: config.StartupFailClosed,
 	})
 	require.NoError(t, err)
 
@@ -60,6 +63,78 @@ func TestRun_LifecycleAgainstLoopback(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancellation")
 	}
+}
+
+// QA gap: TestRun_LifecycleAgainstLoopback exercises Run()'s bind/serve/
+// shutdown path once, which would already hang (and fail the test's
+// 2-second wait) if the heartbeat goroutine ignored context cancellation.
+// This test makes the leak check explicit and repeats the cycle several
+// times, so a goroutine that leaks slowly (rather than hanging outright)
+// still shows up as an accumulating count rather than passing by luck on
+// a single iteration.
+func TestRun_HeartbeatGoroutineDoesNotLeakOnShutdown(t *testing.T) {
+	baseline := settledGoroutineCount()
+
+	const cycles = 3
+	for i := 0; i < cycles; i++ {
+		addr := freePort(t)
+		stub := &stubLookup{length: 1}
+		srv, err := server.New(server.Options{
+			Addr:        addr,
+			Lookup:      func() server.Lookup { return stub },
+			Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+			BlockStatus: http.StatusForbidden,
+			StartupMode: config.StartupFailClosed,
+		})
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- srv.Run(ctx) }()
+
+		require.Eventually(t, func() bool {
+			resp, getErr := http.Get("http://" + addr + "/healthz")
+			if getErr != nil {
+				return false
+			}
+			_ = resp.Body.Close()
+			return true
+		}, 2*time.Second, 20*time.Millisecond, "server should accept /healthz once Run is up (cycle %d)", i)
+
+		cancel()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("Run did not return after context cancellation (cycle %d) — possible goroutine leak", i)
+		}
+	}
+
+	// Polled synchronously in this goroutine, deliberately not via
+	// require.Eventually: testify's Eventually runs the condition in a
+	// freshly spawned goroutine on every tick, so a runtime.NumGoroutine()
+	// read inside that condition always counts the checker goroutine
+	// itself and can never settle back to a pre-Eventually baseline. That
+	// self-referential measurement produced a consistent false failure
+	// here during QA verification of this test — the fix is to poll from
+	// the test's own goroutine instead.
+	last := settledGoroutineCount()
+	for deadline := time.Now().Add(2 * time.Second); last > baseline && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		last = settledGoroutineCount()
+	}
+	require.LessOrEqual(t, last, baseline,
+		"goroutine count did not return to baseline after repeated Run() start/stop cycles — "+
+			"the heartbeat goroutine (or its ticker) may be leaking")
+}
+
+// settledGoroutineCount forces a GC pass and a short pause before
+// sampling runtime.NumGoroutine, so incidental scheduler/GC bookkeeping
+// goroutines don't make the count flaky.
+func settledGoroutineCount() int {
+	runtime.GC()
+	time.Sleep(10 * time.Millisecond)
+	return runtime.NumGoroutine()
 }
 
 // freePort asks the OS for a free TCP port on the loopback interface

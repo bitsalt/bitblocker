@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bitsalt/bitblocker/internal/config"
@@ -45,6 +46,7 @@ type Server struct {
 	blockStatus int
 	logBlocked  bool
 	logAllowed  bool
+	readiness   *readiness
 }
 
 // Options configures a Server. All fields are required — the constructor
@@ -69,6 +71,11 @@ type Options struct {
 	// LogAllowed controls whether /check emits a DEBUG line on an
 	// allowed decision.
 	LogAllowed bool
+	// StartupMode selects the /check behavior while the blocklist is
+	// unusable: fail-closed denies, fail-open allows. It has no effect
+	// once a usable blocklist is loaded, and never affects /healthz or
+	// the unparseable-client-IP path. See ADR 0004.
+	StartupMode config.StartupMode
 }
 
 // New constructs a Server from opts. It validates required fields but
@@ -86,6 +93,13 @@ func New(opts Options) (*Server, error) {
 	if opts.BlockStatus < 400 || opts.BlockStatus > 599 {
 		return nil, fmt.Errorf("server: BlockStatus must be 4xx/5xx, got %d", opts.BlockStatus)
 	}
+	// No default is applied: an unset StartupMode is a wiring bug, and
+	// silently picking one would decide the daemon's security posture on
+	// the caller's behalf.
+	if opts.StartupMode != config.StartupFailClosed && opts.StartupMode != config.StartupFailOpen {
+		return nil, fmt.Errorf("server: StartupMode must be %q or %q, got %q",
+			config.StartupFailClosed, config.StartupFailOpen, opts.StartupMode)
+	}
 
 	return &Server{
 		addr:        opts.Addr,
@@ -94,6 +108,7 @@ func New(opts Options) (*Server, error) {
 		blockStatus: opts.BlockStatus,
 		logBlocked:  opts.LogBlocked,
 		logAllowed:  opts.LogAllowed,
+		readiness:   newReadiness(opts.StartupMode, opts.Logger, time.Now),
 	}, nil
 }
 
@@ -122,6 +137,26 @@ func (s *Server) Run(ctx context.Context) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	// Observe readiness before serving so a cold start reports its
+	// unusable state immediately, rather than waiting for the first
+	// request or the first heartbeat tick. An inert daemon receiving no
+	// traffic at all must still say so.
+	s.readiness.observe(s.lookup())
+
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	ticker := time.NewTicker(heartbeatInterval)
+	var hbWG sync.WaitGroup
+	hbWG.Add(1)
+	go func() {
+		defer hbWG.Done()
+		s.heartbeatLoop(hbCtx, ticker.C)
+	}()
+	defer func() {
+		hbCancel()
+		ticker.Stop()
+		hbWG.Wait()
+	}()
+
 	errCh := make(chan error, 1)
 	go func() {
 		s.logger.Info("server: listening", "addr", s.addr)
@@ -143,6 +178,24 @@ func (s *Server) Run(ctx context.Context) error {
 		return <-errCh
 	case err := <-errCh:
 		return err
+	}
+}
+
+// heartbeatLoop re-reports a persistent unusable-blocklist state on
+// wall-clock cadence until ctx is cancelled. It is driven by tick rather
+// than by an internal ticker so tests can step it deterministically.
+//
+// Cadence, not request activity, is the point: a daemon serving zero
+// traffic while holding no blocklist is precisely the case this signal
+// exists to surface.
+func (s *Server) heartbeatLoop(ctx context.Context, tick <-chan time.Time) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick:
+			s.readiness.heartbeat(s.lookup())
+		}
 	}
 }
 
@@ -168,16 +221,34 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	logger := logging.FromContext(r.Context())
 
+	// One Lookup read per request: a concurrent Swap between two reads
+	// would let a single request evaluate two different tries.
 	lookup := s.lookup()
-	if lookup == nil || lookup.Len() == 0 {
-		logger.Warn("check: fail-closed (blocklist not ready)",
-			"path", r.URL.Path,
-			"remote_addr_redacted", logging.Redact(r.RemoteAddr),
-		)
+	if !s.readiness.observe(lookup) {
+		// The unusable state is reported by the transition and heartbeat
+		// signals, never per request — at real request rates behind
+		// Traefik a per-request line is a log flood during exactly the
+		// incident an operator needs to read the log through.
+		if s.readiness.failOpen() {
+			s.readiness.countFailOpenAllow()
+			// Client-IP extraction is skipped: the decision does not
+			// depend on the address, and extracting it would emit a
+			// misleading unparseable-IP signal for a request that is
+			// being allowed regardless.
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		w.WriteHeader(s.blockStatus)
 		return
 	}
 
+	// An unparseable client IP is fail-closed under BOTH startup modes,
+	// permanently. startup_mode governs data availability, not input
+	// validity: X-Real-IP / X-Forwarded-For is attacker-influenced, so
+	// honoring fail-open here would hand any client a total blocklist
+	// bypass via a malformed header — even against a fully populated
+	// daemon. See ADR 0004 §A.1 and interface spec §3.3. Do not
+	// generalize the fail-open branch above across this one.
 	addr, ok := extractClientIP(r)
 	if !ok {
 		logger.Warn("check: fail-closed (unparseable client IP)",
@@ -208,13 +279,33 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 
 // healthzResponse is the JSON envelope /healthz returns. The shape is
 // stable and documented in docs/bitblocker-spec.md.
+//
+// The Status value domain ("ok" | "empty") is a published contract and
+// does not change; the discriminator fields below were added additively
+// so consumers parsing only Status keep working (ADR 0004 §C, coding
+// standards §14 — extend, do not redefine). Future changes here must
+// stay additive.
 type healthzResponse struct {
-	Status string `json:"status"`
+	Status    string `json:"status"`
+	Serving   string `json:"serving"`
+	EverReady bool   `json:"ever_ready"`
+	// Prefixes is present only when the blocklist is usable.
+	Prefixes *int `json:"prefixes,omitempty"`
+	// EmptyForSeconds is present only when it is not.
+	EmptyForSeconds *int64 `json:"empty_for_seconds,omitempty"`
 }
 
 // handleHealthz implements the readiness probe. While the blocklist is
 // empty (cold start, fetch never succeeded) the daemon is not yet
 // ready to make authorization decisions and returns 503.
+//
+// This is deliberately independent of startup_mode: readiness means
+// "ready to make authorization decisions," not "the HTTP server is
+// answering." Returning 200 under fail-open would let the feature most
+// likely to hide a non-functioning daemon delete the one signal that
+// reveals it — orchestrators and monitoring keyed on /healthz would
+// report a healthy daemon that is blocking nothing. Read ADR 0004 §C
+// before changing this.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -225,12 +316,24 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	lookup := s.lookup()
 	w.Header().Set("Content-Type", "application/json")
 
-	if lookup == nil || lookup.Len() == 0 {
+	if !s.readiness.observe(lookup) {
+		emptyFor := int64(s.readiness.windowSince() / time.Second)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_ = json.NewEncoder(w).Encode(healthzResponse{Status: "empty"})
+		_ = json.NewEncoder(w).Encode(healthzResponse{
+			Status:          "empty",
+			Serving:         s.readiness.serving(false),
+			EverReady:       s.readiness.everReady.Load(),
+			EmptyForSeconds: &emptyFor,
+		})
 		return
 	}
 
+	prefixes := lookup.Len()
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(healthzResponse{Status: "ok"})
+	_ = json.NewEncoder(w).Encode(healthzResponse{
+		Status:    "ok",
+		Serving:   servingEnforcing,
+		EverReady: true,
+		Prefixes:  &prefixes,
+	})
 }
