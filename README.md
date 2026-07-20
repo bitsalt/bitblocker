@@ -11,6 +11,7 @@ See [docs/bitblocker-spec.md](docs/bitblocker-spec.md) for the full design, [doc
 **v1.0.** The daemon runs end-to-end:
 
 - HTTP forwardAuth server exposing `GET /check` and `GET /healthz` (`internal/server`).
+- Fail-open cold-start mode (`behavior.startup_mode: fail-open`) and a readiness-observability contract: a non-suppressible `ERROR` heartbeat plus `/healthz` discriminator fields make a stuck fail-open state, or a daemon that has never loaded a usable blocklist, detectable rather than silent (ADR 0004).
 - Lock-free atomic blocklist swap (`internal/blocklist`, ADR 0001) — `/check` never observes a partial update.
 - On-disk cache with a fail-closed cold start (`internal/diskcache`, ADR 0002): a recent snapshot serves ahead of the first network fetch, and a stale or corrupt snapshot is discarded rather than trusted.
 - DB-IP "IP-to-Country Lite" fetcher, cron scheduler, and a bounded cold-start retry budget (`internal/fetcher`, `internal/scheduler`, ADR 0003) — keyless, no account, no license cost.
@@ -62,11 +63,70 @@ A single YAML file drives the daemon. [config.example.yaml](config.example.yaml)
 - **`refresh.timeout`** — per-fetch timeout. Default `30s`.
 - **`behavior.log_blocked`** / **`behavior.log_allowed`** — whether `/check` emits an INFO line on a blocked decision or a DEBUG line on an allowed one. Fail-closed denials are always logged at WARN regardless of these flags. Defaults `true` / `false`.
 - **`behavior.response_code`** — the HTTP status `/check` returns for a blocked or fail-closed request. Must be a 4xx/5xx status. Default `403`.
-- **`behavior.startup_mode`** — `fail-closed` | `fail-open`. Default `fail-closed`. The field is validated and logged at startup. **Verification note:** at the time of this v1.0 pass, no code path in `internal/server`, `internal/fetcher`, or `internal/scheduler` was found branching on this value — `/check` and `/healthz` fail closed on an empty blocklist regardless of the configured mode. Treat `fail-open` as reserved/not-yet-wired until confirmed otherwise by Developer/Architect; this README will be corrected once verified.
+- **`behavior.startup_mode`** — `fail-closed` | `fail-open`. Default `fail-closed`, and the recommended setting. Governs `/check` only, and only while the blocklist is unusable (empty or not yet loaded) — it has no effect once a usable blocklist is loaded. Two things stay fail-closed under **either** mode: `/healthz` (still `503` while the blocklist is unusable — see below) and an unparseable client IP (attacker-influenced input, not a data-availability symptom — honoring fail-open there would be a blocklist bypass via a malformed header). `fail-open` trades security for availability: because the DB-IP fetch is a keyless, predictable URL (ADR 0003), an actor who can induce a sustained fetch failure *and* a daemon restart can drive a `fail-open` daemon into allow-all — see ADR 0004 §E. The realistic exposure is narrower than it sounds: a failed refresh alone never empties an already-loaded blocklist, and the 48h disk cache (`cache.max_age`) covers a routine restart during an outage, so reaching the bad state needs a restart after *both* a >48h outage and a failed fetch. BitBlocker is scanning-noise reduction, not an authentication boundary — nothing behind it should depend on it for access control. See "Detecting a stuck fail-open state" below for telling a brief cold-start blip from a persistent, silent problem.
 - **`cache.path`** — the on-disk blocklist snapshot path. Default `/var/cache/bitblocker/dbip-country-lite.mmdb`.
 - **`cache.max_age`** — how old a snapshot may be before it's rejected as stale (and removed) rather than trusted at cold start. Default `48h`.
 - **`logging.level`** — `debug` | `info` | `warn` | `error`. Default `info`.
 - **`logging.format`** — `json` | `text`. Default `json`.
+
+## Detecting a stuck fail-open state
+
+If `behavior.startup_mode: fail-open` is set, the point of the setting is
+knowing whether it's a brief cold-start blip or a daemon that has never
+worked — an allow-all daemon that nobody notices is worse than no fail-open
+at all. Three independent signals report the state (verified against
+`internal/server/readiness.go` and `internal/server/server.go`):
+
+- **A recurring `ERROR` heartbeat, every 60 seconds, while the blocklist is
+  unusable.** Message: `check: blocklist still unusable`. It fires on
+  wall-clock cadence — a daemon receiving zero traffic while inert still
+  reports — and it is **not suppressible**: it cannot be silenced by
+  `logging.level` (which tops out at `error`) or by `log_blocked` /
+  `log_allowed`. A daemon that has been inert since deployment emits one of
+  these a minute, forever.
+- **`/healthz` still returns `503` while the blocklist is unusable, under
+  both `startup_mode` values.** It answers "ready to make authorization
+  decisions," not "the process is answering requests" — it does not go
+  green just because `fail-open` is letting traffic through. Its JSON body
+  carries fields worth scripting against:
+
+  ```json
+  {"status":"empty","serving":"allow-all","ever_ready":false,"empty_for_seconds":3721}
+  ```
+
+  - **`serving`** — `"enforcing"` | `"deny-all"` | `"allow-all"` — what
+    `/check` is currently doing.
+  - **`ever_ready`** — whether the daemon has *ever* held a usable
+    blocklist since it started. This is the field that answers "is this
+    dead code."
+  - **`empty_for_seconds`** — how long the current unusable window has
+    lasted. Present only while unusable; a `prefixes` count is present
+    instead while usable.
+
+  (`status` keeps its existing `"ok"` / `"empty"` values unchanged; the
+  fields above are additive.)
+
+### Troubleshooting: `ever_ready: false` vs. `ever_ready: true` and empty
+
+These are two different problems with opposite fixes — debugging one as the
+other wastes the incident:
+
+- **`ever_ready: false`** — the daemon has never loaded a usable blocklist.
+  No fetch has ever succeeded. Check network reachability to the DB-IP
+  download host, the `cache.path` location and its permissions, and the
+  daemon's logs for fetch errors.
+- **`ever_ready: true`, but currently empty** — a blocklist loaded
+  successfully at some point but matched no records. This is a
+  `block.countries` misconfiguration, not a fetch problem: a non-empty
+  country list that matches nothing in the DB-IP dataset is a *successful*
+  load of an empty trie. Check the configured country codes.
+
+The heartbeat's `likely_cause` field names which of these it is, so
+`grep 'blocklist still unusable'` against the daemon's logs points at the
+cause directly. Full field and log-message reference:
+[docs/interfaces/fail-open-and-readiness.md](docs/interfaces/fail-open-and-readiness.md);
+the reasoning behind these choices, including the security posture, is in
+[docs/adr/0004-fail-open-wiring-and-readiness-observability.md](docs/adr/0004-fail-open-wiring-and-readiness-observability.md).
 
 ## Running under systemd
 

@@ -28,6 +28,15 @@ behavior:
   log_blocked: true
   log_allowed: false
   response_code: 403           # used by the forwardAuth endpoint
+  # fail-closed (default, recommended) denies /check while the blocklist
+  # is unusable (cold start, or an extended fetch outage); fail-open
+  # allows instead. Has no effect once a usable blocklist is loaded, and
+  # never changes /healthz or an unparseable client IP — both stay
+  # fail-closed regardless. fail-open trades security for availability;
+  # a non-suppressible ERROR heartbeat + /healthz fields make a stuck
+  # fail-open state detectable rather than silent. See the README's
+  # "Configuration" and "Detecting a stuck fail-open state" sections
+  # before enabling it.
   startup_mode: "fail-closed"  # fail-closed | fail-open
 
 cache:
