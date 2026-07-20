@@ -2,7 +2,7 @@
 
 > **Back to:** [[BitSalt-Projects]]
 > **Started:** 2026-04-21
-> **Status:** 🟡 In progress
+> **Status:** 🟢 v1.0.0 released (2026-07-20) — v1.1 observability in planning
 > **One-liner:** Self-hosted Go daemon that silently drops inbound traffic from specified countries at the Traefik edge, for operators running small-scale self-hosted infrastructure.
 
 **Sprint cadence:** 2 weeks, project-own cadence (independent of the platform's 7-day standard; see Sprint 2 note 2026-05-10 re: platform Sprint 3 window overlap). See the Cadence-drift note under CURRENT below — this cadence is not tracking real elapsed time and is flagged, not yet resolved.
@@ -13,7 +13,7 @@
 
 BitBlocker is a single-binary Go daemon that blocks inbound scanning traffic from selected countries before it reaches application code. It sits behind Traefik as a `forwardAuth` middleware, maintains an in-memory CIDR trie populated from DB-IP "IP-to-Country Lite" data (ADR 0003, 2026-07-05 — supersedes the original MaxMind GeoLite2 choice), and refreshes itself on a cron schedule.
 
-v1 ships country-based blocking with IPv4+IPv6 support and a fail-closed security posture;
+v1.0 (released 2026-07-20) ships country-based blocking with IPv4+IPv6 support and a fail-closed-by-default security posture, plus an opt-in `behavior.startup_mode: fail-open` path gated on a readiness contract with a mandatory heartbeat (ADR 0004).
 
 v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BGP.tools is deferred until the data-source access question is resolved.
 
@@ -25,42 +25,32 @@ v1.1 adds Prometheus metrics and CLI inspection tools. ASN-level blocking via BG
 |---|---|---|
 | Core engine (CIDR trie + MMDB reader + `atomic.Pointer` swap) | Sprint 2 | ✅ |
 | Daemon serves `/check` + `/healthz` with fail-closed cold start | Sprint 3 | ✅ |
-| v1.0 released (binaries + Docker image + operator docs) | Sprint 4 | ⬜ |
+| v1.0 released (binaries + Docker image + operator docs) | Sprint 4 | ✅ |
 | v1.1 observability released (metrics + CLI) | Sprint 5 | ⬜ |
 
 ---
 
-## CURRENT — Sprint 4 (Jun 2 to Jun 15)
+## CURRENT — Sprint 5 (v1.1 observability)
 
-**Sprint goal:** Ship v1.0 — binaries, Docker image, and operator docs, tagged and released.
+**Sprint goal:** v1.1 shipped with Prometheus metrics and CLI inspection tooling — on top of a test seam that protects the new config surface.
 
-Sprint 3's goal ("daemon fetches, refreshes, and survives cold-start failures safely end-to-end") **shipped 2026-07-06** across three merged PRs: PR #13 (ADR 0003 — GeoIP source switch from MaxMind GeoLite2 to DB-IP IP-to-Country Lite), PR #14 (DB-IP fetcher + cron scheduler + cold-start retry budget — implements the Sprint 3 task list), and PR #15 (CI toolchain fix: `golangci-lint-action` v6→v7, go 1.22.2→1.25.11). Full Sprint 3 task-by-task detail is preserved in the Archive below. Sprint 3 is now closed; **Sprint 4 (v1.0 release) is the active sprint.**
+**Sprint 4 closed 2026-07-20 — v1.0.0 released.** Every Sprint 4 task shipped; full task-by-task detail is preserved in the Archive below. The release was verified anonymously after tagging: the GitHub release carries linux/amd64 + linux/arm64 binaries with checksums, and the ghcr package publishes tags `1.0.0`, `1.0`, `1`, and `latest`, with the `:latest` manifest returning HTTP 200 for both architectures. Two release rehearsals (`v1.0.0-rc1`, `v1.0.0-rc2`) preceded the real tag and each caught a defect that would otherwise have shipped — see the Decisions Log below. **Sprint 5 (v1.1 observability) is now the active sprint.**
 
-**Cadence-drift note (flagged, not resolved).** Sprint 3's originally stated calendar window (May 19 – Jun 1) elapsed over five weeks before its shipping PRs landed (2026-07-05/06). Sprint dates on this project are not tracking real elapsed time — plausibly reflecting its solo/part-time pacing rather than the 2-week planning window. Surfaced per PM Standards ("cadence is observed, not imposed"); not resolved here — a Jeff-level cadence conversation. Logged as a Carry-over item below.
+**Cadence-drift note (still flagged, still not resolved).** Sprint 4's stated calendar window was Jun 2 – Jun 15; it closed 2026-07-20, five weeks past. This is the same drift flagged at Sprint 3 close and it has now recurred. Sprint dates on this project are not tracking real elapsed time — plausibly reflecting its solo/part-time pacing rather than the 2-week planning window. Surfaced per PM Standards ("cadence is observed, not imposed"); not resolved here — a Jeff-level cadence call. Carried below. Sprint 5 is deliberately opened **without** a stated calendar window rather than with one that will be wrong on arrival.
 
 ### Tasks
 
-| Task | Status | Notes |
-|---|---|---|
-| Multi-stage Dockerfile producing static binary | ⬜ | |
-| systemd unit file | ⬜ | Needs `CacheDirectory=bitblocker` per OQ-CACHE-3 (Archive) |
-| GitHub Actions release workflow (linux/amd64 + linux/arm64) | ⬜ | |
-| README with install + config walkthrough | ⬜ | Also carries the DB-IP CC-BY 4.0 attribution obligation (credit line + `NOTICE` file) per ADR 0003 § Licensing/attribution |
-| `docs/traefik-integration.md` | ⬜ | |
-| LICENSE file (MIT) | ✅ | Added 2026-04-23, ahead of Sprint 4 |
-| Tag v1.0 and publish release | ⬜ | |
-
-### Looking ahead — Sprint 5 (planned; not yet started)
-
-**Goal:** v1.1 shipped with metrics and CLI inspection tooling.
+**Sequencing is load-bearing:** the `fetcher.BaseURL` test seam (OQ-10) comes **first**, ahead of all metrics and CLI work. Sprint 5 adds new config fields (the metrics admin listener, the refresh-failure webhook URL), and the missing seam means `cmd/bitblocker/main.go` wiring is untestable — new config fields landed before the seam exists would ship unprotected. Do not reorder.
 
 | Task | Status | Notes |
 |---|---|---|
-| `/metrics` Prometheus endpoint on separate admin listener | ⬜ | |
+| Inject `fetcher.BaseURL` to make `main.go` wiring testable (OQ-10) | ⬜ | **FIRST — blocks every task below.** Decision 543: OQ-10 was deferred out of v1.0 but sequenced ahead of the metrics work precisely because the metrics/webhook config fields would otherwise land without a test seam covering their wiring |
+| `/metrics` Prometheus endpoint on separate admin listener | ⬜ | Adds a new config field — depends on the OQ-10 seam |
+| Alert webhook on refresh failure | ⬜ | Adds a new config field (webhook URL) — depends on the OQ-10 seam |
 | `bitblocker check <ip>` CLI subcommand | ⬜ | |
 | `bitblocker list` CLI subcommand | ⬜ | |
-| Alert webhook on refresh failure | ⬜ | |
-| Tag v1.1 and publish release | ⬜ | |
+| Live heartbeat-ticker test coverage (OQ-FAILOPEN-5) | ⬜ | Test gap deferred out of v1.0 with the ADR 0004 fail-open work; the mandatory heartbeat's live ticker is not exercised under test |
+| Tag v1.1 and publish release | ⬜ | Rehearse with an `rc` tag first — the practice earned its keep twice at v1.0 (see Decisions Log) |
 
 ### Open Questions
 
@@ -70,12 +60,17 @@ Sprint 3's goal ("daemon fetches, refreshes, and survives cold-start failures sa
 > - **OQ narrative** (question text + resolution rationale): the Archive's frozen table below carries the narrative as of freeze time. Going forward, new OQs are created via `create_open_question` (orchestrator-emitted on PM's behalf) and narrative lives in this CURRENT block or the Decisions Log below.
 > - Git history retains this file's pre-freeze OQ table for audit purposes.
 >
-> **Status snapshot (2026-07-06):** RESOLVED — OQ-1 (MaxMind key, dissolved by ADR 0003), OQ-5 (`registered_country` foreclosed by DB-IP; `country.iso_code`-only v1), OQ-7 (govulncheck stdlib findings, closed by go 1.25.11), OQ-8 (lint action v7). OPEN — OQ-2 (ASN blocking scope), OQ-3 (allowlist), OQ-4 (leftmost-XFF), OQ-6 (reworded — see Decisions Log below; now purely an optional `maxminddb` v2 adoption question), OQ-CACHE-1, OQ-CACHE-2, OQ-CACHE-3.
+> **Status snapshot (2026-07-20, 18 OQs total).** OPEN (7) — OQ-2 (ASN blocking scope), OQ-3 (allowlist), OQ-4 (leftmost-XFF knob), OQ-6 (optional `maxminddb` v2 adoption), OQ-10 (`main.go` wiring untestable — v1.1, sequenced FIRST), OQ-FAILOPEN-3 (the declared-but-unconsumed `startup_mode` knob; see the dated correction in the Archive's Sprint 3 table), OQ-FAILOPEN-5 (live heartbeat-ticker test gap — v1.1). RESOLVED (10) — OQ-1, OQ-5, OQ-7, OQ-8, OQ-9, OQ-CACHE-2, OQ-CACHE-3, OQ-FAILOPEN-1, OQ-FAILOPEN-2, OQ-FAILOPEN-4. CLOSED (1) — OQ-CACHE-1. Query `get_open_questions(slug="bitblocker")` for live state; this snapshot is a convenience copy and is not authoritative.
 
 ### Decisions Log (current sprint)
 
 | Date | Decision | Reasoning |
 |---|---|---|
+| 2026-07-20 | **v1.0.0 released** (DB decision 546). Tagged and published after two rehearsals; verified anonymously — full release with linux/amd64 + linux/arm64 binaries and checksums, ghcr tags `1.0.0` / `1.0` / `1` / `latest`, `:latest` manifest HTTP 200 across both platforms. | The two release rehearsals (`v1.0.0-rc1`, `v1.0.0-rc2`) each caught a defect that would otherwise have shipped in the real tag: (1) the Dockerfile builder was pinned to golang 1.25.11 while `go.mod` declares 1.25.12 — a hard failure under `GOTOOLCHAIN=local`, invisible to normal CI because CI does not build the release image the same way; (2) the ghcr package published **private** by default, so the image would have been unpullable by exactly the self-hosted audience the project targets. Neither was a code defect — both lived in release plumbing that only a full dry run exercises. This is the argument for rehearsing every future tag rather than treating the rehearsal as v1.0 ceremony (PR #24 also added a build-drift CI guard so the Dockerfile/`go.mod` toolchain skew cannot silently recur). |
+| 2026-07-20 | **v1.0 tag HELD for the ADR 0004 fail-open work**; ADR 0004 promoted proposed→accepted (DB decision 539). Landed via PR #21 (ADR), PR #22 (implementation), PR #23 (docs). | The `behavior.startup_mode` knob had been declared in config since Sprint 1 but was never consumed by any code path (see the dated correction in the Archive's Sprint 3 task table). Shipping v1.0 with a documented config knob that silently does nothing would have been a correctness and trust defect in an authorization component — worse than shipping late. The accepted design wires fail-open at the **readiness gate** with a **mandatory heartbeat**, so a daemon in fail-open cannot sit silently degraded: the absence of the heartbeat is itself the stuck-state signal an operator can alert on. |
+| 2026-07-20 | **The bitblocker repo stays PUBLIC** (DB decision 540) — it is the only public repo in the org. Residual deferred to deploy time: header-trust configuration. | Verified before deciding rather than assumed: no secrets in the working tree or in git history, and the daemon is not deployed anywhere in the estate. The project is also positioned as noise reduction at the edge, **not** an authentication boundary — so public source does not hand an attacker a bypass for a control anyone is relying on for security. The one genuinely deployment-sensitive surface is header trust (`X-Real-IP` / XFF handling depends on what the fronting proxy is configured to do), and that is a per-deployment configuration concern, not a reason to close the source. |
+| 2026-07-20 | **OQ-10 deferred out of v1.0 but sequenced FIRST in v1.1**, ahead of the Sprint 5 metrics work (DB decision 543). | `cmd/bitblocker/main.go`'s wiring is untestable because `fetcher.BaseURL` is not injectable. Deferring the fix past v1.0 was the right call — it is a test-seam gap, not a shipped-behavior defect. But it cannot be deferred *within* v1.1: Sprint 5 introduces new config fields (the metrics admin listener, the refresh-failure webhook URL), and every one of them is wired through exactly the `main.go` path the missing seam leaves uncovered. Fixing the seam after the fields land means the fields ship unprotected and the seam work then has to retrofit coverage onto code already in a release. Order matters more than priority here. |
+| 2026-07-19 | **OQ-CACHE-2 resolved: on detecting a corrupt or stale cache file at startup, remove it** — non-fatally (DB decision 522). PR #18. | Matches the Architect lean recorded when the OQ was filed. Leaving the unusable file in place means every subsequent start re-trips the same failed load and re-emits the same WARN, so the daemon accumulates a permanent noisy-but-harmless error that operators learn to ignore — the worst outcome for a signal that should mean something. Removal is safe because the cache is a pure derived artifact (the raw MMDB), regenerable by the next fetch. The removal is non-fatal for the same reason cache-write failure is non-fatal: the cache is an optimization on the cold-start path, never a correctness dependency. |
 | 2026-07-06 | CI toolchain fix: `golangci-lint-action` v6→v7 (resolves OQ-8); `go` directive bumped 1.22.2→1.25.11, closing all `govulncheck` stdlib findings (scan = 0 vulns; moots OQ-7). `maxminddb-golang` stays pinned at v1.13.1 — the Go 1.24 floor only matters if/when `v2` is adopted (OQ-6, now purely optional and decoupled from security). PR #15. | `golangci-lint` v2.11.4 requires action `@v7`; a pre-existing gap surfaced 2026-05-08 (OQ-8). The toolchain bump was the cheapest way to retire all eight stdlib `govulncheck` findings at once (OQ-7) rather than triage per-CVE. |
 | 2026-07-05 | GeoIP country source switched from MaxMind GeoLite2-Country to DB-IP "IP-to-Country Lite" (ADR 0003). **Amends** the 2026-04-22 decision "MaxMind consumed as MMDB binary format (not CSV)" — the *provider* changes; the MMDB-binary-not-CSV half is retained unchanged. No account/key/cost; public dated MMDB download URL; CC-BY 4.0 attribution (README + `NOTICE`, lands with the Sprint 4 README task). Drop-in for `internal/mmdb/loader.go` (decodes only `country.iso_code`, which DB-IP also carries) — zero loader change. Dissolves OQ-1 (MaxMind license-key procurement) entirely. PR #13. | MaxMind free-tier license-key procurement was blocking the Sprint 3 fetcher end-to-end, and MaxMind was non-responsive / steering toward paid plans — friction the self-hosted hobbyist audience shouldn't have to absorb. The spec's own pre-v1 Open Question had already flagged DB-IP as exactly this alternative. See ADR 0003 for the full source comparison. |
 
@@ -83,9 +78,12 @@ Sprint 3's goal ("daemon fetches, refreshes, and survives cold-start failures sa
 
 | Task | Original sprint | Moved to | Reason |
 |---|---|---|---|
-| Sprint calendar drift (see Cadence-drift note above) | Sprint 3 | Flagged, not resolved | Bitblocker's stated sprint windows are not tracking real elapsed time. Not resolving unilaterally — a Jeff-level cadence call. Trigger: next SPRINT-REVIEW or a Jeff-directed cadence conversation. |
+| Sprint calendar drift (see Cadence-drift note above) | Sprint 3 | Sprint 5 (still flagged, not resolved) | Bitblocker's stated sprint windows are not tracking real elapsed time — now recurred at Sprint 4 close (stated Jun 2–15, closed 2026-07-20). Not resolving unilaterally — a Jeff-level cadence call. Trigger: next SPRINT-REVIEW or a Jeff-directed cadence conversation. |
+| OQ-10 — inject `fetcher.BaseURL` to make `main.go` wiring testable | Sprint 4 (deferred) | Sprint 5, task 1 | Deferred out of v1.0 (test-seam gap, not shipped-behavior defect). Sequenced FIRST in v1.1 per decision 543 — the metrics/webhook config fields wire through the uncovered `main.go` path. Now a Sprint 5 task, not a floating carry-over. |
+| OQ-FAILOPEN-5 — live heartbeat-ticker test coverage | Sprint 4 (deferred) | Sprint 5 | Test gap deferred out of v1.0 alongside the ADR 0004 fail-open work; the mandatory heartbeat's live ticker is not exercised under test. Now a Sprint 5 task. |
+| OQ-2 / OQ-3 / OQ-4 / OQ-6 — open feature/scope questions | Sprint 3 and earlier | Standing open | ASN blocking scope (OQ-2), allowlist (OQ-3), leftmost-XFF knob (OQ-4), optional `maxminddb` v2 adoption (OQ-6). None gate v1.1; each is a Jeff/roadmap scope call revisited when its feature is scheduled. |
 
-**Last updated:** 2026-07-06 — PM narrative-sync pass landing PRs #13/#14/#15 (ADR 0003 GeoIP source switch; DB-IP fetcher/scheduler/cold-start; CI toolchain fix).
+**Last updated:** 2026-07-20 — PM Sprint 4 close-out / Sprint 5 open: v1.0.0 released (PRs #18–#24; tags rc1/rc2/1.0.0); ADR 0004 fail-open wired; OQ-FAILOPEN-3 false-completion correction applied to the Archive; Sprint 5 opened with OQ-10 sequenced first.
 
 > _Sprint-file format: interim CURRENT/Archive split per the `sprint-file-format` skill (this pass is bitblocker's first migration to the format). The Open Questions table is retired per ADR 0041 — see pointer note above._
 
@@ -136,7 +134,7 @@ _This section holds all pre-2026-07-06 sprint file content, migrated from the pr
 
 **Goal:** Daemon fetches, refreshes, and survives cold-start failures safely end-to-end.
 
-**Sprint 3 close (2026-07-06).** All six tasks shipped across three merged PRs: PR #13 (ADR 0003 — GeoIP source switch from MaxMind GeoLite2 to DB-IP "IP-to-Country Lite," dissolving the MaxMind-license-key blocker), PR #14 (DB-IP fetcher + cron scheduler + cold-start retry budget — the bulk of this sprint's task list), and PR #15 (CI toolchain fix, folded in opportunistically: `golangci-lint-action` v6→v7, go 1.22.2→1.25.11). Sprint goal met.
+**Sprint 3 close (2026-07-06).** All six tasks shipped across three merged PRs: PR #13 (ADR 0003 — GeoIP source switch from MaxMind GeoLite2 to DB-IP "IP-to-Country Lite," dissolving the MaxMind-license-key blocker), PR #14 (DB-IP fetcher + cron scheduler + cold-start retry budget — the bulk of this sprint's task list), and PR #15 (CI toolchain fix, folded in opportunistically: `golangci-lint-action` v6→v7, go 1.22.2→1.25.11). Sprint goal met. **⚠️ See the dated 2026-07-20 correction on the `behavior.startup_mode` task row below:** one of these six rows was recorded ✅ in error — the `startup_mode` knob was declared-but-unconsumed and was not actually wired until PR #22 (2026-07-20), so this "all six shipped" line overstated the Sprint 3 delivery on that one row.
 
 | Task | Status | Notes |
 |---|---|---|
@@ -144,7 +142,7 @@ _This section holds all pre-2026-07-06 sprint file content, migrated from the pr
 | Cron scheduler for periodic refresh | ✅ | PR #14 |
 | Retry with exponential backoff on fetch failure | ✅ | PR #14 |
 | Bounded cold-start retry budget | ✅ | PR #14 |
-| `behavior.startup_mode: fail-closed \| fail-open` config knob (default fail-closed) | ✅ | The knob itself shipped with Sprint 1's config schema task (`internal/config`); this Sprint 3 task's scope was the fetcher/scheduler's cold-start path actually consulting it, which PR #14 wires in |
+| `behavior.startup_mode: fail-closed \| fail-open` config knob (default fail-closed) | ⚠️ ~~✅~~ → corrected | **⚠️ CORRECTION 2026-07-20 (OQ-FAILOPEN-3).** _Original 2026-07-06 claim (preserved verbatim):_ "The knob itself shipped with Sprint 1's config schema task (`internal/config`); this Sprint 3 task's scope was the fetcher/scheduler's cold-start path actually consulting it, which PR #14 wires in." **This claim is false.** PR #14 never wired the knob. A repo-wide search for `StartupMode` at that time found consumers only in `internal/config` and a single `cmd/bitblocker/main.go` log line — nothing in `internal/server`, `internal/fetcher`, or `internal/scheduler` branched on the value. The knob sat **declared-but-unconsumed** from Sprint 1 until PR #22 actually wired it on 2026-07-20 (ADR 0004 — fail-open at the readiness gate with a mandatory heartbeat). The gap plausibly stayed invisible for ~3 months **because** this row asserted the work was done, so no one looked. This is a dated factual correction, not a re-scoping — the original claim is retained above so the error and its correction are both legible. |
 | End-to-end integration tests (fixture MMDB + stub HTTP server) | ✅ | PR #14 |
 
 ---
