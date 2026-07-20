@@ -76,3 +76,48 @@ jobs:
 
       - name: Run govulncheck
         run: govulncheck ./...
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Single-arch (native, linux/amd64) build via the runner's builtin
+      # Buildx-backed `docker build` — no docker/setup-buildx-action or
+      # QEMU needed for a single native platform. This exists to catch
+      # drift between go.mod's `go` directive and the Dockerfile's
+      # pinned builder image (the class of bug behind the v1.0.0-rc1
+      # release-rehearsal failure: go.mod bumped for a CVE fix, the
+      # Dockerfile's builder pin didn't move, and nothing in CI ever
+      # built the Dockerfile to notice). release.yml's `docker` job
+      # already exercises the real multi-arch buildx push at release
+      # time; duplicating that here on every PR would slow CI for no
+      # additional drift-detection value; --load is unnecessary too,
+      # `docker build` already loads a single-platform result locally.
+      - name: Build image
+        run: docker build -t bitblocker:ci .
+
+      # Smoke test: the runtime image is distroless (no shell, no
+      # package manager), so there's no `docker run ... sh -c` health
+      # check available. Instead, run the binary with an intentionally
+      # invalid flag set: `flag.NewFlagSet(..., flag.ContinueOnError)`
+      # in cmd/bitblocker/main.go returns flag.ErrHelp on --help, which
+      # `run()` propagates as a non-nil error, giving a deterministic
+      # exit code 1 and a usage line on stderr. This confirms the built
+      # binary actually executes inside the runtime image (right arch,
+      # right libc-less distroless linking, entrypoint wired correctly)
+      # without needing a real config file or network access.
+      - name: Smoke test — binary executes in the runtime image
+        run: |
+          set +e
+          output="$(docker run --rm bitblocker:ci --help 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -ne 1 ]; then
+            echo "expected exit code 1 from --help, got $status" >&2
+            exit 1
+          fi
+          echo "$output" | grep -q "path to YAML config file"
