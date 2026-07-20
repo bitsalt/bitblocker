@@ -1,6 +1,6 @@
 # ADR 0004: `behavior.startup_mode: fail-open` is wired at the `/check` readiness gate only, paired with a mandatory recurring ERROR heartbeat; `/healthz` stays 503 while the blocklist is empty
 
-- **Status:** proposed — promotion to `accepted` is unblocked by the operator gate on **OQ-FAILOPEN-1** (hold the v1.0 tag for this work vs. tag v1.0 now and ship fail-open in v1.0.1). Everything else in this ADR is architectural and settled; that one item is a scope-vs-calendar call reserved to the operator.
+- **Status:** accepted — ratified by the operator 2026-07-20. **OQ-FAILOPEN-1** resolved: hold the v1.0 tag for this work rather than tagging v1.0 now and shipping fail-open in v1.0.1 (Architect lean confirmed).
 - **Date:** 2026-07-20
 - **Deciders:** Jeff (operator) — the decision to wire `fail-open` rather than drop or defer it (2026-07-20); Architect — the engagement predicate, the `/healthz` semantics, and the observability contract
 - **Amends:** `docs/BitBlocker.md` decisions log 2026-04-22 — "Cold-start fail mode: fail-closed with guardrails." The **default posture is unchanged** (fail-closed remains the default and the recommended setting). What changes: the `startup_mode` knob listed there as a guardrail becomes *functional* rather than declarative, and the `/healthz` 503 guardrail is explicitly re-scoped to be independent of `startup_mode`.
@@ -408,11 +408,12 @@ project would carry in a released artifact and have to explain in a v1.0.1.
 
 ## Open questions surfaced
 
-- **OQ-FAILOPEN-1 (for the ratification gate).** Confirm the recommendation to
+- **OQ-FAILOPEN-1 (for the ratification gate).** ~~Confirm the recommendation to
   hold the v1.0 tag for this work rather than tagging v1.0 now and shipping
-  fail-open in v1.0.1. Architect lean: hold — stated above. This is an operator
-  call, not an architectural one, and it is the only thing in this ADR that
-  trades scope against calendar.
+  fail-open in v1.0.1.~~ **Resolved 2026-07-20 — hold.** The operator confirmed
+  the Architect lean: the v1.0 tag waits for the Developer + QA passes rather
+  than shipping a released artifact whose documented `startup_mode` knob does
+  the opposite of what it says. This ADR is therefore `accepted`.
 - **OQ-FAILOPEN-2 (Developer, at touch time).** The heartbeat interval is
   specified as a 60s constant. If the Developer finds a reason it should be
   derived from something (e.g. backing off after the first hour to reduce log
