@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/bitsalt/bitblocker/internal/blocklist"
+	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/server"
 )
 
@@ -47,6 +48,7 @@ func newServer(t *testing.T, lookup server.Lookup, opts ...func(*server.Options)
 		BlockStatus: http.StatusForbidden,
 		LogBlocked:  true,
 		LogAllowed:  false,
+		StartupMode: config.StartupFailClosed,
 	}
 	for _, fn := range opts {
 		fn(&o)
@@ -87,10 +89,15 @@ func TestNew_RejectsMissingFields(t *testing.T) {
 		name string
 		opts server.Options
 	}{
-		{"missing addr", server.Options{Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 403}},
-		{"missing lookup", server.Options{Addr: ":0", Logger: logger, BlockStatus: 403}},
-		{"missing logger", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, BlockStatus: 403}},
-		{"out-of-range status", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 200}},
+		{"missing addr", server.Options{Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 403, StartupMode: config.StartupFailClosed}},
+		{"missing lookup", server.Options{Addr: ":0", Logger: logger, BlockStatus: 403, StartupMode: config.StartupFailClosed}},
+		{"missing logger", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, BlockStatus: 403, StartupMode: config.StartupFailClosed}},
+		{"out-of-range status", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 200, StartupMode: config.StartupFailClosed}},
+		// An unset StartupMode is a wiring bug, not a request to pick a
+		// default: the constructor must not decide the daemon's security
+		// posture on the caller's behalf.
+		{"missing startup mode", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 403}},
+		{"invalid startup mode", server.Options{Addr: ":0", Lookup: func() server.Lookup { return nil }, Logger: logger, BlockStatus: 403, StartupMode: config.StartupMode("fail-sideways")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -191,10 +198,17 @@ func TestCheck_FailClosedWhenBlocklistEmpty(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code)
 	require.Empty(t, w.Body.String())
 
+	// The per-request WARN this test previously asserted was replaced by
+	// a once-per-transition ERROR (ADR 0004 §D.4): a daemon that cannot
+	// make authorization decisions has failed at its only job, and
+	// saying so once per request floods the log during the incident.
 	lines := parseLogLines(t, logs)
 	require.NotEmpty(t, lines)
-	require.Equal(t, "WARN", lines[len(lines)-1]["level"])
-	require.Equal(t, "check: fail-closed (blocklist not ready)", lines[len(lines)-1]["msg"])
+	last := lines[len(lines)-1]
+	require.Equal(t, "ERROR", last["level"])
+	require.Equal(t, "check: blocklist unusable; denying all requests", last["msg"])
+	require.Equal(t, "deny-all", last["serving"])
+	require.Equal(t, false, last["ever_ready"])
 }
 
 func TestCheck_FailClosedWhenLookupNil(t *testing.T) {

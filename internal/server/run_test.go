@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/bitsalt/bitblocker/internal/config"
 	"github.com/bitsalt/bitblocker/internal/server"
 )
 
@@ -28,6 +29,7 @@ func TestRun_LifecycleAgainstLoopback(t *testing.T) {
 		Lookup:      func() server.Lookup { return stub },
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		BlockStatus: http.StatusForbidden,
+		StartupMode: config.StartupFailClosed,
 	})
 	require.NoError(t, err)
 

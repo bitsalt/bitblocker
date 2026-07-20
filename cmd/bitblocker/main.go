@@ -75,6 +75,7 @@ func run(args []string) error {
 		BlockStatus: cfg.Behavior.ResponseCode,
 		LogBlocked:  cfg.Behavior.LogBlocked,
 		LogAllowed:  cfg.Behavior.LogAllowed,
+		StartupMode: cfg.Behavior.StartupMode,
 	})
 	if err != nil {
 		return fmt.Errorf("server: %w", err)

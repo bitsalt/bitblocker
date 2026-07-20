@@ -138,6 +138,13 @@ func TestLoadCountryBlocklist_DualStack(t *testing.T) {
 	require.True(t, trie.Contains(addr(t, "::ffff:10.0.0.5")))
 }
 
+// A non-empty country set that matches nothing in the DB is a
+// successful load of an empty trie, NOT ErrNoCountries (which fires only
+// on an empty country list, which config validation already rejects).
+// This is the reachability proof for ADR 0004's "ready-then-empty"
+// readiness sub-state: the daemon can publish a Len()==0 trie via a
+// perfectly successful fetch, and must report it as a block.countries
+// misconfiguration rather than as a failed fetch.
 func TestLoadCountryBlocklist_NoMatchingCountries_TrieIsEmpty(t *testing.T) {
 	path := writeCountryMMDB(t, []fixtureEntry{
 		{"10.0.0.0/24", "US"},
