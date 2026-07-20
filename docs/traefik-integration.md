@@ -49,28 +49,50 @@ This means: **for the header contract to mean anything, Traefik must be the comp
 
 ## Response contract
 
-Verified against `internal/server/server.go`:
+Verified against `internal/server/server.go`. What BitBlocker returns depends
+first on whether the blocklist is currently **usable**, and — only in the
+unusable case — on `behavior.startup_mode` (ADR 0004):
 
-| BitBlocker response | Traefik behavior | Meaning |
-|---|---|---|
-| `200 OK` | Forwards the original request | Client IP is not blocked |
-| Configured block status (`behavior.response_code`, default `403`) | Blocks the original request; Traefik returns this status to the client | Client IP is blocked, **or** BitBlocker could not make a decision |
+| Condition | BitBlocker response | Traefik behavior | Meaning |
+|---|---|---|---|
+| Blocklist usable, client IP blocked | Configured block status (`behavior.response_code`, default `403`) | Blocks the original request | Client IP matched a blocked country |
+| Blocklist usable, client IP not blocked | `200 OK` | Forwards the original request | Client IP is not blocked |
+| Blocklist usable, client IP unparseable | Configured block status | Blocks the original request | Fail-closed **regardless of `startup_mode`** — see below |
+| Blocklist unusable, `startup_mode: fail-closed` (default) | Configured block status | Blocks the original request | BitBlocker cannot make a decision, so it denies |
+| Blocklist unusable, `startup_mode: fail-open` | `200 OK` | Forwards the original request | BitBlocker cannot make a decision, but is configured to allow rather than deny — see the [README](../README.md#detecting-a-stuck-fail-open-state) before relying on this |
 
-Two cases both return the block status, and both are fail-closed by design:
+"Blocklist unusable" means a cold start with no disk cache and no successful
+fetch yet, or a loaded blocklist that matched no records for the configured
+`block.countries`.
 
-- The client IP matched a blocked country.
-- The blocklist is not yet populated (cold start with no cache and no successful fetch yet), or `X-Real-IP`/`X-Forwarded-For` carried no parseable address. Either way, BitBlocker cannot answer "allowed," so it answers "blocked."
+**One thing stays fail-closed no matter how `startup_mode` is set:** an
+unparseable client IP (`X-Real-IP` / `X-Forwarded-For` carried no parseable
+address). That input is attacker-influenced, not a symptom of missing data —
+honoring fail-open there would let any client bypass the blocklist with a
+malformed header, even against a fully populated daemon (ADR 0004 §A.1).
+`startup_mode` governs data availability only; it is never consulted for this
+case.
 
-The response body is always empty; BitBlocker never returns a body Traefik would show the client.
+The response body is always empty; BitBlocker never returns a body Traefik
+would show the client.
 
 ## `/healthz` as a health check
 
-`GET /healthz` reports whether the daemon has a populated blocklist and is ready to make `/check` decisions — not just whether the process is alive:
+`GET /healthz` reports whether the daemon has a populated blocklist and is ready to make `/check` decisions — not just whether the process is alive. **This is independent of `behavior.startup_mode`: `/healthz` returns `503` while the blocklist is unusable under both `fail-closed` and `fail-open`** (ADR 0004 §C). A `fail-open` daemon that is currently allowing all `/check` traffic still reports itself unhealthy — that is deliberate, not a bug, so that an orchestrator or monitoring keyed on `/healthz` still catches the degradation even though `/check` looks fine.
 
 | Status | Body | Meaning |
 |---|---|---|
-| `503 Service Unavailable` | `{"status":"empty"}` | Cold-starting: no disk cache loaded and no successful fetch yet |
-| `200 OK` | `{"status":"ok"}` | A populated blocklist is active |
+| `200 OK` | `{"status":"ok","serving":"enforcing","ever_ready":true,"prefixes":<N>}` | A populated blocklist is active |
+| `503 Service Unavailable` | `{"status":"empty","serving":"deny-all"\|"allow-all","ever_ready":<bool>,"empty_for_seconds":<N>}` | Blocklist unusable: cold start with no cache/successful fetch yet, or a loaded blocklist matching no configured countries |
+
+The `status` value domain (`"ok"` / `"empty"`) is unchanged and preserved for
+existing consumers; `serving`, `ever_ready`, `prefixes`, and
+`empty_for_seconds` are additive fields. `serving` reflects what `/check` is
+currently doing (`"deny-all"` under fail-closed, `"allow-all"` under
+fail-open, while unusable); `ever_ready: false` means the daemon has never
+held a usable blocklist since it started, which is the "is this a dead
+daemon" signal. Full field reference and troubleshooting guidance:
+[README § Detecting a stuck fail-open state](../README.md#detecting-a-stuck-fail-open-state).
 
 Use this as a container `HEALTHCHECK` or a Traefik health check on the service so nothing routes traffic assuming BitBlocker is ready before it actually is:
 
