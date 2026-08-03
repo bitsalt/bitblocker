@@ -215,6 +215,28 @@ wait for a DB-IP outage — can prevent the daemon from acquiring data. Under
    `max_age` 48h) means a routine restart during a DB-IP outage serves cached
    data and never reaches the predicate at all. The uncovered window is a restart
    after >48h of both downtime and fetch failure.
+
+   > **Superseded (2026-08-03, ADR 0005 §2.3):** the cache does **not** cover
+   > that overlap as the code stands. Cache staleness is measured against the
+   > file's mtime (`internal/diskcache/cache.go:108`), and the mtime advances
+   > only when a refresh actually downloads bytes (`internal/fetcher/fetcher.go:157`);
+   > a `304 Not Modified` returns before any cache write (`fetcher.go:147-150`).
+   > Because DB-IP publishes monthly while the default refresh cadence is daily,
+   > a healthy long-running daemon receives 304s for ~28 days a month and its
+   > cache mtime exceeds `max_age` within two days — after which a restart finds
+   > the cache stale and **deletes** it (`cmd/bitblocker/main.go:195-199`). The
+   > true uncovered window is therefore **any restart coinciding with a fetch
+   > failure**, not a restart after >48h of both. The phrasing above is the
+   > original framing, retained for the record and corrected here. This is a
+   > factual correction established by reading the code, independent of ADR
+   > 0005's decisions; the remedy (ADR 0005 §2.5 Fix A — touch the cache's mtime
+   > on a 304) is specified in `docs/interfaces/cache-freshness-and-stale-fallback.md`
+   > and is not yet implemented. One caveat: the mechanism depends on
+   > `download.db-ip.com` actually serving `ETag` / `Last-Modified`; if it serves
+   > neither, every fetch is unconditional and the defect is latent rather than
+   > live (ADR 0005 OQ-D — one `curl -sSI` settles it). §E's overall conclusion
+   > — no hard guardrail, fail-closed stays the default — is **not** disturbed;
+   > what changes is that bound 2 is weaker than stated until Fix A lands.
 3. **The blast radius is bounded by what BitBlocker is.** It is scanning-noise
    reduction in front of an application, not an authentication boundary. Nothing
    behind it should be relying on it for access control; the spec is explicit
@@ -455,5 +477,3 @@ project would carry in a released artifact and have to explain in a v1.0.1.
 ---
 
 *End of ADR 0004.*
-</content>
-</invoke>
