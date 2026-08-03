@@ -216,7 +216,7 @@ wait for a DB-IP outage — can prevent the daemon from acquiring data. Under
    data and never reaches the predicate at all. The uncovered window is a restart
    after >48h of both downtime and fetch failure.
 
-   > **Superseded (2026-08-03, ADR 0005 §2.3):** the cache does **not** cover
+   > **Superseded (2026-08-03, ADR 0005 §3.3):** the cache does **not** cover
    > that overlap as the code stands. Cache staleness is measured against the
    > file's mtime (`internal/diskcache/cache.go:108`), and the mtime advances
    > only when a refresh actually downloads bytes (`internal/fetcher/fetcher.go:157`);
@@ -229,7 +229,7 @@ wait for a DB-IP outage — can prevent the daemon from acquiring data. Under
    > failure**, not a restart after >48h of both. The phrasing above is the
    > original framing, retained for the record and corrected here. This is a
    > factual correction established by reading the code, independent of ADR
-   > 0005's decisions; the remedy (ADR 0005 §2.5 Fix A — touch the cache's mtime
+   > 0005's decisions; the remedy (ADR 0005 §3.5 Fix A — touch the cache's mtime
    > on a 304) is specified in `docs/interfaces/cache-freshness-and-stale-fallback.md`
    > and is not yet implemented. One caveat: the mechanism depends on
    > `download.db-ip.com` actually serving `ETag` / `Last-Modified`; if it serves

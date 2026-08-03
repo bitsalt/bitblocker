@@ -7,15 +7,15 @@
 > **Governing standards:** `coding-standards.md` §14 (interface design), §4
 > (explicit boundaries); `coding-standards-go.md` §4 (injected clock), §1
 > (tests), §6 (error wrapping), §10 (doc comments).
-> **Decisions:** ADR 0005 §2.3/§2.5 (this slice), ADR 0002 (the cache contract
+> **Decisions:** ADR 0005 §3.3/§3.5 (this slice), ADR 0002 (the cache contract
 > being repaired), ADR 0004 §E.2 (the security bound that depends on it).
 
 This spec is precise enough for a Developer to implement without re-deriving the
 design. **Nothing here is implemented.** Fix A is a defect fix that should land
-before the app01 rollout reaches Phase 2; Fix B is a Sprint 5 improvement. They
-are independent — Fix A can ship alone.
+before enforcement is turned on for the app01 rollout (ADR 0005 §5.1, Phase 4);
+Fix B is a Sprint 5 improvement. They are independent — Fix A can ship alone.
 
-Do not re-derive the reasoning; it is in ADR 0005 §2.3–§2.5.
+Do not re-derive the reasoning; it is in ADR 0005 §3.3–§3.5.
 
 ---
 
@@ -113,7 +113,7 @@ direct `os` dependency for cache-file metadata:
 // published artifact, which is what Load's max-age bound is asking about.
 // Without it the mtime advances only on an actual download — monthly for
 // DB-IP — so a healthy daemon's cache goes stale within days and is
-// deleted on the next restart. See ADR 0005 §2.3.
+// deleted on the next restart. See ADR 0005 §3.3.
 //
 // A missing file returns ErrAbsent; the caller treats that as benign.
 // All other failures are non-fatal to the caller: the cache is an
@@ -253,7 +253,7 @@ in the log:
 // returning the file's age alongside the trie. It is the last-resort
 // recovery path only — call it exclusively after Load has returned
 // ErrStale and the cold-start retry budget has been exhausted. Every
-// other caller must use Load. See ADR 0005 §2.5 Fix B.
+// other caller must use Load. See ADR 0005 §3.5 Fix B.
 func LoadStale(path string, now time.Time, countries []config.CountryCode) (*blocklist.Trie, time.Duration, error)
 ```
 
@@ -290,7 +290,7 @@ in this state.
 should `/healthz` return `200` or `503` while serving stale? Architect lean:
 **`200`.** The daemon is making real authorization decisions, which is what
 readiness means (ADR 0004 §C), and a 503 here would be read by an orchestrator
-as "restart me" — the exact action §4.4 of ADR 0005 shows to be harmful. The
+as "restart me" — the exact action §5.4 of ADR 0005 shows to be harmful. The
 degradation is carried by `serving: "enforcing-stale"` and by the ERROR
 heartbeat, which are the channels ADR 0004 §D established for precisely this
 purpose. Confirm at the ADR that ratifies Fix B rather than deciding it in code.
@@ -360,7 +360,8 @@ Stated so neither fix drifts into the posture question ADR 0004 settled:
 
 1. **Run §1.1's `curl`.** Record the result. It decides urgency, not scope.
 2. **Fix A** — one Developer pass, one QA pass. Should land before the app01
-   rollout reaches Phase 2 (ADR 0005 §4.1). Small enough to ride with a patch
+   rollout turns enforcement on (ADR 0005 §5.1, Phase 4). Small enough to ride
+   with a patch
    release; per the project's own Sprint 4 lesson, rehearse the tag with an `rc`
    first.
 3. **Fix B** — Sprint 5, after OQ-10's `fetcher.BaseURL` test seam, which is
@@ -374,7 +375,7 @@ Stated so neither fix drifts into the posture question ADR 0004 settled:
 ## 7. Cross-references
 
 - `docs/adr/0005-shared-host-per-site-policy-attachment-and-fail-mode.md`
-  §2.3–§2.5 — the finding and the decision. Read before changing anything here.
+  §3.3–§3.5 — the finding and the decision. Read before changing anything here.
 - `docs/adr/0004-fail-open-wiring-and-readiness-observability.md` §A.2, §C, §D,
   §E.2 — the posture this preserves and the security bound §2.4 restores. §E.2
   carries a correction block filed by the ADR 0005 pass.
